@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ////////////////////////////////////////////////////////////////////////
 #include "otpch.h"
+#ifdef __USE_PGSQL__
 #include <iostream>
 
 #include "database.h"
@@ -23,32 +24,49 @@
 #include "configmanager.h"
 extern ConfigManager g_config;
 
-DatabasePgSQL::DatabasePgSQL()
+DatabasePgSQL::DatabasePgSQL() :
+	m_handle(NULL)
 {
 	std::stringstream dns;
 	dns << "host='" << g_config.getString(ConfigManager::SQL_HOST) << "' dbname='" << g_config.getString(ConfigManager::SQL_DB) << "' user='" << g_config.getString(ConfigManager::SQL_USER) << "' password='" << g_config.getString(ConfigManager::SQL_PASS) << "' port='" << g_config.getNumber(ConfigManager::SQL_PORT) << "'";
 
 	m_handle = PQconnectdb(dns.str().c_str());
-	m_connected = PQstatus(m_handle) == CONNECTION_OK;
-	if(!m_connected)
+	if(PQstatus(m_handle) != CONNECTION_OK)
+	{
 		std::clog << "Failed to estabilish PostgreSQL database connection: " << PQerrorMessage(m_handle) << std::endl;
+		PQfinish(m_handle);
+	}
+	else
+		m_connected = true;
 }
 
-bool DatabasePgSQL::getParam(DBParam_t param)
+std::string DatabasePgSQL::_parse(const std::string& s)
 {
-	switch(param)
-	{
-		case DBPARAM_MULTIINSERT:
-			return true;
+	std::string query = "";
+	query.reserve(s.size());
 
-		default:
-			break;
+	bool inString = false;
+	for(uint32_t i = 0; i < s.length(); ++i)
+	{
+		uint8_t ch = s[i];
+		if(ch == '\'')
+		{
+			if(inString && s[i + 1] != '\'')
+				inString = false;
+			else
+				inString = true;
+		}
+
+		if(ch == '`' && !inString)
+			ch = '"';
+
+		query += ch;
 	}
 
-	return false;
+	return query;
 }
 
-bool DatabasePgSQL::query(const std::string& query)
+bool DatabasePgSQL::query(std::string query)
 {
 	if(!m_connected)
 		return false;
@@ -68,7 +86,7 @@ bool DatabasePgSQL::query(const std::string& query)
 	return true;
 }
 
-DBResult* DatabasePgSQL::storeQuery(const std::string& query)
+DBResult* DatabasePgSQL::storeQuery(std::string query)
 {
 	if(!m_connected)
 		return NULL;
@@ -88,10 +106,10 @@ DBResult* DatabasePgSQL::storeQuery(const std::string& query)
 	return verifyResult(result);
 }
 
-std::string DatabasePgSQL::escapeString(const std::string& s)
+std::string DatabasePgSQL::escapeString(std::string s)
 {
 	// remember to quote even empty string!
-	if(!s.size())
+	if(!m_connected || !s.size())
 		return std::string("''");
 
 	// the worst case is 2n + 1
@@ -111,7 +129,7 @@ std::string DatabasePgSQL::escapeString(const std::string& s)
 std::string DatabasePgSQL::escapeBlob(const char *s, uint32_t length)
 {
 	// remember to quote even empty stream!
-	if(!s)
+	if(!m_connected || !s)
 		return std::string("''");
 
 	// quotes escaped string and frees temporary buffer
@@ -143,30 +161,6 @@ uint64_t DatabasePgSQL::getLastInsertId()
 	const uint64_t id = atoll(PQgetvalue(res, 0, PQfnumber(res, "last")));
 	PQclear(res);
 	return id;
-}
-
-std::string DatabasePgSQL::_parse(const std::string& s)
-{
-	std::string query = "";
-	bool inString = false;
-	for(uint32_t a = 0; a < s.length(); a++)
-	{
-		uint8_t ch = s[a];
-		if(ch == '\'')
-		{
-			if(inString && s[a + 1] != '\'')
-				inString = false;
-			else
-				inString = true;
-		}
-
-		if(ch == '`' && !inString)
-			ch = '"';
-
-		query += ch;
-	}
-
-	return query;
 }
 
 const char* PgSQLResult::getDataStream(const std::string& s, uint64_t& size)
@@ -215,6 +209,7 @@ PgSQLResult::PgSQLResult(PGresult* result)
 		return;
 
 	m_handle = result;
-	m_cursor = -1;
 	m_rows = PQntuples(m_handle) - 1;
+	m_cursor = -1;
 }
+#endif

@@ -37,6 +37,12 @@ class _DBResult;
 class DatabaseMySQL;
 class MySQLResult;
 
+#elif defined(__USE_MYSQLPP__)
+#define DATABASE_CLASS DatabaseMySQLpp
+#define RESULT_CLASS MySQLppResult
+class DatabaseMySQLpp;
+class MySQLppResult;
+
 #elif defined(__USE_SQLITE__)
 #define DATABASE_CLASS DatabaseSQLite
 #define RESULT_CLASS SQLiteResult
@@ -69,6 +75,8 @@ enum DBParam_t
 class _Database
 {
 	public:
+		friend class DBTransaction;
+
 		/**
 		* Singleton implementation.
 		*
@@ -86,7 +94,7 @@ class _Database
 		* @param DBParam_t parameter to get
 		* @return suitable for given parameter
 		*/
-		DATABASE_VIRTUAL bool getParam(DBParam_t) {return false;}
+		DATABASE_VIRTUAL bool multiLine() const {return false;}
 
 		/**
 		* Database connected.
@@ -95,14 +103,13 @@ class _Database
 		*
 		* @return whether or not the database is connected.
 		*/
-		DATABASE_VIRTUAL bool isConnected() {return m_connected;}
+		DATABASE_VIRTUAL bool isConnected() const {return m_connected;}
 
 		/**
 		* Database ...
 		*/
 		DATABASE_VIRTUAL void use() {m_use = OTSYS_TIME();}
 
-	protected:
 		/**
 		* Transaction related methods.
 		*
@@ -112,13 +119,11 @@ class _Database
 		* @note
 		*	If your database system doesn't support transactions you should return true - it's not feature test, code should work without transaction, just will lack integrity.
 		*/
-		friend class DBTransaction;
 
-		DATABASE_VIRTUAL bool beginTransaction() {return 0;}
-		DATABASE_VIRTUAL bool rollback() {return 0;}
-		DATABASE_VIRTUAL bool commit() {return 0;}
+		DATABASE_VIRTUAL bool beginTransaction() {return false;}
+		DATABASE_VIRTUAL bool rollback() {return false;}
+		DATABASE_VIRTUAL bool commit() {return false;}
 
-	public:
 		/**
 		* Executes command.
 		*
@@ -127,7 +132,7 @@ class _Database
 		* @param std::string query command
 		* @return true on success, false on error
 		*/
-		DATABASE_VIRTUAL bool query(const std::string&) {return 0;}
+		DATABASE_VIRTUAL bool query(std::string) {return false;}
 
 		/**
 		* Queries database.
@@ -137,7 +142,7 @@ class _Database
 		* @param std::string query
 		* @return results object (null on error)
 		*/
-		DATABASE_VIRTUAL DBResult* storeQuery(const std::string&) {return 0;}
+		DATABASE_VIRTUAL DBResult* storeQuery(std::string) {return NULL;}
 
 		/**
 		* Escapes string for query.
@@ -147,7 +152,7 @@ class _Database
 		* @param std::string string to be escaped
 		* @return quoted string
 		*/
-		DATABASE_VIRTUAL std::string escapeString(const std::string&) {return "''";}
+		DATABASE_VIRTUAL std::string escapeString(std::string) {return "''";}
 
 		/**
 		* Escapes binary stream for query.
@@ -183,16 +188,16 @@ class _Database
 		DATABASE_VIRTUAL DatabaseEngine_t getDatabaseEngine() {return DATABASE_ENGINE_NONE;}
 
 	protected:
-		_Database() {m_connected = false;}
-		DATABASE_VIRTUAL ~_Database() {}
-
 		DBResult* verifyResult(DBResult* result);
+
+		_Database(): m_connected(false) {}
+		DATABASE_VIRTUAL ~_Database() {m_connected = false;}
 
 		bool m_connected;
 		int64_t m_use;
 
 	private:
-		static Database* _instance;
+		static Database* m_instance;
 };
 
 class _DBResult
@@ -214,13 +219,13 @@ class _DBResult
 		*\returns The String of the selected field and row
 		*\param s The name of the field
 		*/
-		DATABASE_VIRTUAL std::string getDataString(const std::string&) {return "''";}
+		DATABASE_VIRTUAL std::string getDataString(const std::string&) {return "";}
 
 		/** Get the blob of a field in database
 		*\returns a PropStream that is initiated with the blob data field, if not exist it returns NULL.
 		*\param s The name of the field
 		*/
-		DATABASE_VIRTUAL const char* getDataStream(const std::string&, uint64_t&) {return 0;}
+		DATABASE_VIRTUAL const char* getDataStream(const std::string&, uint64_t&) {return "";}
 
 		/** Result freeing
 		*/
@@ -246,7 +251,7 @@ class DBQuery : public std::stringstream
 	friend class _Database;
 	public:
 		DBQuery() {databaseLock.lock();}
-		virtual ~DBQuery() {str(""); databaseLock.unlock();}
+		~DBQuery() {databaseLock.unlock();}
 
 	protected:
 		static boost::recursive_mutex databaseLock;
@@ -265,15 +270,15 @@ class DBInsert
 		*
 		* @param Database* database wrapper
 		*/
-		DBInsert(Database* db);
-		virtual ~DBInsert() {}
+		DBInsert(Database* db): m_db(db), m_rows(0) {}
+		~DBInsert() {}
 
 		/**
 		* Sets query prototype.
 		*
 		* @param std::string& INSERT query
 		*/
-		void setQuery(const std::string& query);
+		void setQuery(std::string query);
 
 		/**
 		* Adds new row to INSERT statement.
@@ -282,7 +287,7 @@ class DBInsert
 		*
 		* @param std::string& row data
 		*/
-		bool addRow(const std::string& row);
+		bool addRow(std::string row);
 		/**
 		* Allows to use addRow() with stringstream as parameter.
 		*/
@@ -295,7 +300,6 @@ class DBInsert
 
 	protected:
 		Database* m_db;
-		bool m_multiLine;
 
 		uint32_t m_rows;
 		std::string m_query, m_buf;
@@ -305,6 +309,8 @@ class DBInsert
 #ifndef MULTI_SQL_DRIVERS
 #if defined(__USE_MYSQL__)
 #include "databasemysql.h"
+#elif defined(__USE_MYSQLPP__)
+#include "databasemysqlpp.h"
 #elif defined(__USE_SQLITE__)
 #include "databasesqlite.h"
 #elif defined(__USE_PGSQL__)
@@ -317,38 +323,38 @@ class DBTransaction
 	public:
 		DBTransaction(Database* database)
 		{
-			m_database = database;
-			m_state = STATE_NO_START;
+			m_db = database;
+			m_state = STATE_FRESH;
 		}
 
-		virtual ~DBTransaction()
+		~DBTransaction()
 		{
-			if(m_state == STATE_START)
-				m_database->rollback();
+			if(m_state == STATE_READY)
+				m_db->rollback();
 		}
 
 		bool begin()
 		{
-			m_state = STATE_START;
-			return m_database->beginTransaction();
+			m_state = STATE_READY;
+			return m_db->beginTransaction();
 		}
 
 		bool commit()
 		{
-			if(m_state != STATE_START)
+			if(m_state != STATE_READY)
 				return false;
 
-			m_state = STEATE_COMMIT;
-			return m_database->commit();
+			m_state = STATE_DONE;
+			return m_db->commit();
 		}
 
 	private:
-		Database* m_database;
+		Database* m_db;
 		enum TransactionStates_t
 		{
-			STATE_NO_START,
-			STATE_START,
-			STEATE_COMMIT
+			STATE_FRESH,
+			STATE_READY,
+			STATE_DONE
 		} m_state;
 };
 #endif

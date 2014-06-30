@@ -26,23 +26,24 @@
 #include "position.h"
 #include <libxml/parser.h>
 
-#define ITEMS 13000
-#define RANDOMIZATION 50
+#define ITEMS_SIZE 12660
+#define ITEMS_INCREMENT 500
+#define ITEMS_RANDOMIZATION 50
 
 #define SLOTP_WHEREEVER 0xFFFFFFFF
-#define SLOTP_HEAD 1 << 0
-#define	SLOTP_NECKLACE 1 << 1
-#define	SLOTP_BACKPACK 1 << 2
-#define	SLOTP_ARMOR 1 << 3
-#define	SLOTP_RIGHT 1 << 4
-#define	SLOTP_LEFT 1 << 5
-#define	SLOTP_LEGS 1 << 6
-#define	SLOTP_FEET 1 << 7
-#define	SLOTP_RING 1 << 8
-#define	SLOTP_AMMO 1 << 9
-#define	SLOTP_DEPOT 1 << 10
-#define	SLOTP_TWO_HAND 1 << 11
-#define SLOTP_HAND SLOTP_LEFT | SLOTP_RIGHT
+#define SLOTP_HEAD (1 << 0)
+#define	SLOTP_NECKLACE (1 << 1)
+#define	SLOTP_BACKPACK (1 << 2)
+#define	SLOTP_ARMOR (1 << 3)
+#define	SLOTP_RIGHT (1 << 4)
+#define	SLOTP_LEFT (1 << 5)
+#define	SLOTP_LEGS (1 << 6)
+#define	SLOTP_FEET (1 << 7)
+#define	SLOTP_RING (1 << 8)
+#define	SLOTP_AMMO (1 << 9)
+#define	SLOTP_DEPOT (1 << 10)
+#define	SLOTP_TWO_HAND (1 << 11)
+#define SLOTP_HAND (SLOTP_LEFT | SLOTP_RIGHT)
 
 enum ItemTypes_t
 {
@@ -75,6 +76,7 @@ enum FloorChange_t
 	CHANGE_SOUTH_EX = 7,
 	CHANGE_WEST_EX = 8,
 	CHANGE_NONE = 9,
+	CHANGE_PRE_LAST = 8,
 	CHANGE_LAST = CHANGE_NONE
 };
 
@@ -84,10 +86,11 @@ struct Abilities
 	{
 		memset(skills, 0, sizeof(skills));
 		memset(skillsPercent, 0, sizeof(skillsPercent));
-		memset(stats, 0 , sizeof(stats));
+		memset(stats, 0, sizeof(stats));
 		memset(statsPercent, 0, sizeof(statsPercent));
 
 		memset(absorb, 0, sizeof(absorb));
+		memset(fieldAbsorb, 0, sizeof(fieldAbsorb));
 		memset(increment, 0, sizeof(increment));
 		memset(reflect[REFLECT_PERCENT], 0, sizeof(reflect[REFLECT_PERCENT]));
 		memset(reflect[REFLECT_CHANCE], 0, sizeof(reflect[REFLECT_CHANCE]));
@@ -100,7 +103,8 @@ struct Abilities
 	bool manaShield, invisible, regeneration, preventLoss, preventDrop;
 	CombatType_t elementType;
 
-	int16_t elementDamage, absorb[COMBAT_LAST + 1], increment[INCREMENT_LAST + 1], reflect[REFLECT_LAST + 1][COMBAT_LAST + 1];
+	int16_t elementDamage, absorb[COMBAT_LAST + 1], increment[INCREMENT_LAST + 1],
+		reflect[REFLECT_LAST + 1][COMBAT_LAST + 1], fieldAbsorb[COMBAT_LAST + 1];
 	int32_t skills[SKILL_LAST + 1], skillsPercent[SKILL_LAST + 1], stats[STAT_LAST + 1], statsPercent[STAT_LAST + 1],
 		speed, healthGain, healthTicks, manaGain, manaTicks, conditionSuppressions;
 };
@@ -109,11 +113,12 @@ class Condition;
 class ItemType
 {
 	private:
-		ItemType(const ItemType&) {}
+		ItemType(const ItemType&) {} //TODO!
 
 	public:
 		ItemType();
 		virtual ~ItemType();
+		Abilities* getAbilities() {if(!abilities) abilities = new Abilities; return abilities;}
 
 		bool isGroundTile() const {return (group == ITEM_GROUP_GROUND);}
 		bool isContainer() const {return (group == ITEM_GROUP_CONTAINER);}
@@ -131,11 +136,13 @@ class ItemType
 		bool isBed() const {return (type == ITEM_TYPE_BED);}
 
 		bool hasSubType() const {return (isFluidContainer() || isSplash() || stackable || charges);}
+		bool hasAbilities() const {return abilities != NULL;}
 
-		bool stopTime, showCount, stackable, showDuration, showCharges, showAttributes, dualWield,
+		bool loaded, stopTime, showCount, stackable, showDuration, showCharges, showAttributes, dualWield,
 			allowDistRead, canReadText, canWriteText, forceSerialize, isVertical, isHorizontal, isHangable,
 			usable, movable, pickupable, rotable, replacable, lookThrough, walkStack, hasHeight, blockSolid,
-			blockPickupable, blockProjectile, blockPathFind, allowPickupable, alwaysOnTop, floorChange[CHANGE_LAST];
+			blockPickupable, blockProjectile, blockPathFind, allowPickupable, alwaysOnTop, floorChange[CHANGE_LAST],
+			isAnimation, specialDoor, closingDoor, cache;
 
 		MagicEffect_t magicEffect;
 		FluidTypes_t fluidSource;
@@ -147,8 +154,9 @@ class ItemType
 		ShootEffect_t shootType;
 		Ammo_t ammoType;
 
-		uint16_t transformUseTo[2], transformToFree, transformEquipTo, transformDeEquipTo,
-			id, clientId, maxItems, slotPosition, wieldPosition, speed, maxTextLength, writeOnceItemId;
+		uint16_t transformBed[PLAYERSEX_MALE + 1], transformUseTo, transformEquipTo, transformDeEquipTo,
+			id, clientId, maxItems, slotPosition, wieldPosition, speed, maxTextLength, writeOnceItemId, wareId,
+			premiumDays;
 
 		int32_t attack, extraAttack, defense, extraDefense, armor, breakChance, hitChance, maxHitChance,
 			runeLevel, runeMagLevel, lightLevel, lightColor, decayTo, rotateTo, alwaysOnTopOrder;
@@ -158,7 +166,7 @@ class ItemType
 		std::string name, pluralName, article, description, text, writer, runeSpellName, vocationString;
 
 		Condition* condition;
-		Abilities abilities;
+		Abilities* abilities;
 		itemgroup_t group;
 		ItemTypes_t type;
 		float weight;
@@ -169,12 +177,22 @@ class Array
 {
 	public:
 		Array(uint32_t n);
-		virtual ~Array();
+		virtual ~Array() {clear();}
+
+		void clear()
+		{
+			if(m_data && m_size)
+			{
+				free(m_data);
+				m_size = 0;
+			}
+		}
+		void reload();
 
 		A getElement(uint32_t id);
 		const A getElement(uint32_t id) const;
-		void addElement(A a, uint32_t pos);
 
+		void addElement(A a, uint32_t pos);
 		uint32_t size() {return m_size;}
 
 	private:
@@ -191,9 +209,10 @@ Array<A>::Array(uint32_t n)
 }
 
 template<typename A>
-Array<A>::~Array()
+void Array<A>::reload()
 {
-	free(m_data);
+	m_data = (A*)malloc(sizeof(A) * m_size);
+	memset(m_data, 0, sizeof(A) * m_size);
 }
 
 template<typename A>
@@ -217,12 +236,11 @@ const A Array<A>::getElement(uint32_t id) const
 template<typename A>
 void Array<A>::addElement(A a, uint32_t pos)
 {
-	#define INCREMENT 5000
 	if(pos >= m_size)
 	{
-		m_data = (A*)realloc(m_data, sizeof(A) * (pos + INCREMENT));
-		memset(m_data + m_size, 0, sizeof(A) * (pos + INCREMENT - m_size));
-		m_size = pos + INCREMENT;
+		m_data = (A*)realloc(m_data, sizeof(A) * (pos + ITEMS_INCREMENT));
+		memset(m_data + m_size, 0, sizeof(A) * (pos + ITEMS_INCREMENT - m_size));
+		m_size = pos + ITEMS_INCREMENT;
 	}
 
 	m_data[pos] = a;
@@ -239,7 +257,7 @@ typedef std::map<int32_t, int32_t> IntegerMap;
 class Items
 {
 	public:
-		Items(): m_randomizationChance(RANDOMIZATION), items(ITEMS) {}
+		Items(): m_randomizationChance(ITEMS_RANDOMIZATION), items(ITEMS_SIZE) {}
 		virtual ~Items() {clear();}
 
 		bool reload();

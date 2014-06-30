@@ -30,7 +30,7 @@ class Player;
 class Game;
 class Tile;
 class Map;
- 
+
 struct FindPathParams;
 struct AStarNode
 {
@@ -47,13 +47,13 @@ using boost::shared_ptr;
 
 #define MAP_NORMALWALKCOST 10
 #define MAP_DIAGONALWALKCOST 25
-
+ 
 class AStarNodes
 {
 	public:
 		AStarNodes();
 		virtual ~AStarNodes() {}
-
+ 
 		void openNode(AStarNode* node);
 		void closeNode(AStarNode* node);
  
@@ -66,28 +66,28 @@ class AStarNodes
  
 		bool isInList(uint16_t x, uint16_t y);
 		int32_t getEstimatedDistance(uint16_t x, uint16_t y, uint16_t xGoal, uint16_t yGoal);
- 
+
 		int32_t getMapWalkCost(const Creature* creature, AStarNode* node,
 			const Tile* neighbourTile, const Position& neighbourPos);
 		static int32_t getTileWalkCost(const Creature* creature, const Tile* tile);
-
+ 
 	private:
 		AStarNode nodes[MAX_NODES];
-
+ 
 		std::bitset<MAX_NODES> openNodes;
 		uint32_t curNode;
 };
-
+ 
 template<class T> class lessPointer: public std::binary_function<T*, T*, bool>
 {
 	public:
 		bool operator()(T*& t1, T*& t2) {return *t1 < *t2;}
 };
-
+ 
 #define FLOOR_BITS 3
 #define FLOOR_SIZE (1 << FLOOR_BITS)
 #define FLOOR_MASK (FLOOR_SIZE - 1)
- 
+
 struct Floor
 {
 	Floor();
@@ -125,10 +125,10 @@ class QTreeLeafNode : public QTreeNode
 		virtual ~QTreeLeafNode();
 
 		Floor* createFloor(uint16_t z);
-		Floor* getFloor(uint16_t z){return m_array[z];}
+		Floor* getFloor(uint16_t z) {return m_array[z];}
 
-		QTreeLeafNode* stepSouth(){return m_leafS;}
-		QTreeLeafNode* stepEast(){return m_leafE;}
+		QTreeLeafNode* stepSouth() {return m_leafS;}
+		QTreeLeafNode* stepEast() {return m_leafE;}
  
 		void addCreature(Creature* c);
 		void removeCreature(Creature* c);
@@ -174,6 +174,11 @@ class Map
 		* \returns true if the map was saved successfully
 		*/
 		bool saveMap();
+
+		/**
+		* \returns true if updating house auctions completed
+		*/
+		bool updateAuctions();
 
 		/**
 		* Get a single tile.

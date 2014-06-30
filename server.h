@@ -18,17 +18,13 @@
 #ifndef __SERVER__
 #define __SERVER__
 #include "otsystem.h"
+
+#include "connection.h"
 #include <boost/enable_shared_from_this.hpp>
 
 class ServiceBase;
-typedef boost::shared_ptr<ServiceBase> Service_ptr;
-
 class ServicePort;
-typedef boost::shared_ptr<ServicePort> ServicePort_ptr;
-
 class Connection;
-typedef boost::shared_ptr<Connection> Connection_ptr;
-
 class Protocol;
 class NetworkMessage;
 
@@ -87,7 +83,7 @@ class ServicePort : boost::noncopyable, public boost::enable_shared_from_this<Se
 		typedef std::vector<Service_ptr> ServiceVec;
 		ServiceVec m_services;
 
-		typedef std::vector<Acceptor_ptr> AcceptorVec;
+		typedef std::map<Acceptor_ptr, IPAddress> AcceptorVec;
 		AcceptorVec m_acceptors;
 
 		boost::asio::io_service& m_io_service;

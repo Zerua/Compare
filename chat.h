@@ -66,10 +66,11 @@ class ChatChannel
 				vocationId) != m_vocationMap->end();}
 
 		bool addUser(Player* player);
-		bool removeUser(Player* player);
+		bool removeUser(Player* player, bool exclude = false);
+		bool hasUser(Player* player) const {return player && m_users.find(player->getID()) != m_users.end();}
 
-		bool talk(Player* player, SpeakClasses type, const std::string& text, uint32_t _time = 0, ProtocolGame* pg = NULL); //CA
-		bool talk(std::string nick, SpeakClasses type, std::string text);
+		bool talk(Player* player, MessageClasses type, const std::string& text, uint32_t statementId);
+		bool talk(std::string nick, MessageClasses type, const std::string& text);
 
 	protected:
 		uint16_t m_id, m_flags;
@@ -103,12 +104,15 @@ class PrivateChatChannel : public ChatChannel
 
 		void closeChannel();
 
+		const InviteList& getInvitedUsers() {return m_invites;}
+
 	protected:
 		InviteList m_invites;
 		uint32_t m_owner;
 };
 
 typedef std::list<ChatChannel*> ChannelList;
+typedef std::list<std::pair<uint16_t, std::string> > ChannelsList;
 typedef std::map<uint32_t, std::string> StatementMap;
 
 class Chat
@@ -125,23 +129,25 @@ class Chat
 		bool deleteChannel(Player* player, uint16_t channelId);
 
 		ChatChannel* addUserToChannel(Player* player, uint16_t channelId);
+		void reOpenChannels(Player* player);
 		bool removeUserFromChannel(Player* player, uint16_t channelId);
-		void removeUserFromAllChannels(Player* player);
+		void removeUserFromChannels(Player* player);
 
-        bool talkToChannel(Player* player, SpeakClasses type, const std::string& text, uint16_t channelId, ProtocolGame* pg = NULL); //CA
-		
+		bool talk(Player* player, MessageClasses type, const std::string& text,
+			uint16_t channelId, uint32_t statementId, bool anonymous = false);
+
 		ChatChannel* getChannel(Player* player, uint16_t channelId);
 		ChatChannel* getChannelById(uint16_t channelId);
 
 		std::string getChannelName(Player* player, uint16_t channelId);
-		ChannelList getChannelList(Player* player);
+		ChannelsList getChannelList(Player* player);
 
 		PrivateChatChannel* getPrivateChannel(Player* player);
 		bool isPrivateChannel(uint16_t cid) const {return m_privateChannels.find(cid) != m_privateChannels.end();}
 
 		ChannelList getPublicChannels() const;
 		bool isPublicChannel(uint16_t cid) const {return cid != CHANNEL_GUILD && cid
-			!= CHANNEL_PARTY && cid != CHANNEL_RVR && !isPrivateChannel(cid);}
+			!= CHANNEL_RVR && cid != CHANNEL_PARTY && !isPrivateChannel(cid);}
 
 		uint32_t statement;
 		StatementMap statementMap;

@@ -109,12 +109,7 @@ enum
 	CMD_OPEN_SERVER = 4,
 	CMD_SHUTDOWN_SERVER = 5,
 	CMD_RELOAD_SCRIPTS = 6,
-	//CMD_PLAYER_INFO = 7,
-	//CMD_GETONLINE = 8,
 	CMD_KICK = 9,
-	//CMD_BAN_MANAGER = 10,
-	//CMD_SERVER_INFO = 11,
-	//CMD_GETHOUSE = 12,
 	CMD_SAVE_SERVER = 13,
 	CMD_SEND_MAIL = 14,
 	CMD_SHALLOW_SAVE_SERVER = 15
@@ -123,12 +118,12 @@ enum
 enum
 {
 	REQUIRE_LOGIN = 1,
-	REQUIRE_ENCRYPTION = 2,
+	REQUIRE_ENCRYPTION = 2
 };
 
 enum
 {
-	ENCRYPTION_RSA1024XTEA = 1,
+	ENCRYPTION_RSA1024XTEA = 1
 };
 
 class NetworkMessage;
@@ -160,7 +155,7 @@ class Admin
 	protected:
 		Admin();
 
-		int32_t m_currrentConnections;
+		int32_t m_currentConnections;
 		bool m_encrypted;
 
 		RSA* m_key_RSA1024XTEA;
@@ -206,7 +201,10 @@ class ProtocolAdmin : public Protocol
 		};
 
 		virtual void parsePacket(NetworkMessage& msg);
+		virtual void releaseProtocol();
+#ifdef __DEBUG_NET_DETAIL__
 		virtual void deleteProtocolTask();
+#endif
 
 		// commands
 		void adminCommandPayHouses();

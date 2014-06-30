@@ -104,7 +104,6 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 			{
 				output->put<char>(MP_MSG_ERROR);
 				output->putString("Too many login attempts");
-				getConnection()->send(output);
 
 				getConnection()->close();
 				addLogLine(LOGTYPE_WARNING, "Too many login attempts");
@@ -115,7 +114,6 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 			{
 				output->put<char>(MP_MSG_ERROR);
 				output->putString("You are not logged in");
-				getConnection()->send(output);
 
 				getConnection()->close();
 				addLogLine(LOGTYPE_WARNING, "Wrong command while not logged in");
@@ -150,7 +148,6 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 					{
 						output->put<char>(MP_MSG_FAILURE);
 						output->putString("Unknown connection");
-						getConnection()->send(output);
 
 						getConnection()->close();
 						addLogLine(LOGTYPE_ERROR, "Login failed due to unknown connection");
@@ -158,7 +155,6 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 					}
 					else
 					{
-						m_state = LOGGED_IN;
 						output->put<char>(MP_MSG_USERS);
 						addLogLine(LOGTYPE_EVENT, "Logged in, sending users");
 
@@ -175,22 +171,19 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 							output->put<uint32_t>(it->first);
 							output->putString(it->second);
 						}
+
+						OutputMessagePool::getInstance()->send(output);
+						m_state = LOGGED_IN;
 					}
 				}
 				else
 				{
-					output->put<char>(MP_MSG_FAILURE);
+					output->put<char>(MP_MSG_ERROR);
 					output->putString("Wrong password");
 
 					m_loginTries++;
 					addLogLine(LOGTYPE_EVENT, "Login failed due to wrong password (" + pass + ")");
 				}
-			}
-			else
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Cannot login right now!");
-				addLogLine(LOGTYPE_ERROR, "Wrong state at login");
 			}
 
 			break;
@@ -200,7 +193,6 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 		{
 			output->put<char>(MP_MSG_BYE);
 			output->putString("Bye, bye!");
-			getConnection()->send(output);
 
 			getConnection()->close();
 			addLogLine(LOGTYPE_EVENT, "Logout");
@@ -211,170 +203,242 @@ void ProtocolManager::parsePacket(NetworkMessage& msg)
 			break;
 
 		case MP_MSG_PING:
-			output->put<char>(MP_MSG_PONG);
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::pong, this)));
 			break;
 
 		case MP_MSG_LUA:
-		{
-			std::string script = msg.getString();
-			if(!Manager::getInstance()->execute(script))
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Unable to reserve enviroment for Lua script");
-				addLogLine(LOGTYPE_ERROR, "Unable to reserve enviroment for Lua script");
-			}
-			else
-			{
-				output->put<char>(MP_MSG_SUCCESS);
-				addLogLine(LOGTYPE_EVENT, "Executed Lua script");
-			}
-
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::execute, this, msg.getString())));
 			break;
-		}
 
 		case MP_MSG_USER_INFO:
-		{
-			uint32_t playerId = msg.get<uint32_t>();
-			if(Player* player = g_game.getPlayerByID(playerId))
-			{
-				output->put<char>(MP_MSG_USER_DATA);
-				output->put<uint32_t>(playerId);
-
-				output->put<uint32_t>(player->getGroupId());
-				output->put<uint32_t>(player->getVocationId());
-
-				output->put<uint32_t>(player->getLevel());
-				output->put<uint32_t>(player->getMagicLevel());
-				// TODO?
-			}
-			else
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Player not found");
-			}
-		}
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::user, this, msg.get<uint32_t>())));
+			break;
 
 		case MP_MSG_CHAT_REQUEST:
-		{
-			output->put<char>(MP_MSG_CHAT_LIST);
-			ChannelList list = g_chat.getPublicChannels();
-
-			output->put<uint16_t>(list.size());
-			for(ChannelList::const_iterator it = list.begin(); it != list.end(); ++it)
-			{
-				output->put<uint16_t>((*it)->getId());
-				output->putString((*it)->getName());
-
-				output->put<uint16_t>((*it)->getFlags());
-				output->put<uint16_t>((*it)->getUsers().size());
-			}
-
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::channels, this)));
 			break;
-		}
 
 		case MP_MSG_CHAT_OPEN:
-		{
-			ChatChannel* channel = NULL;
-			uint16_t channelId = msg.get<uint16_t>();
-			if((channel = g_chat.getChannelById(channelId)) && g_chat.isPublicChannel(channelId))
-			{
-				m_channels |= (uint32_t)channelId;
-				output->put<char>(MP_MSG_CHAT_USERS);
-				UsersMap users = channel->getUsers();
-
-				output->put<uint16_t>(users.size());
-				for(UsersMap::const_iterator it = users.begin(); it != users.end(); ++it)
-					output->put<uint32_t>(it->first);
-			}
-			else
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Invalid channel");
-			}
-
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::channel, this, msg.get<uint16_t>(), true)));
 			break;
-		}
 
 		case MP_MSG_CHAT_CLOSE:
-		{
-			uint16_t channelId = msg.get<uint16_t>();
-			if(g_chat.getChannelById(channelId) && g_chat.isPublicChannel(channelId))
-			{
-				m_channels &= ~(uint32_t)channelId;
-				output->put<char>(MP_MSG_SUCCESS);
-			}
-			else
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Invalid channel");
-			}
-
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::channel, this, msg.get<uint16_t>(), false)));
 			break;
-		}
 
 		case MP_MSG_CHAT_TALK:
-		{
-			std::string name = msg.getString();
-			uint16_t channelId = msg.get<uint16_t>();
-			SpeakClasses type = (SpeakClasses)msg.get<char>();
-			std::string message = msg.getString();
-
-			ChatChannel* channel = NULL;
-			if((channel = g_chat.getChannelById(channelId)) && g_chat.isPublicChannel(channelId))
-			{
-				if(!channel->talk(name, type, message))
-				{
-					output->put<char>(MP_MSG_FAILURE);
-					output->putString("Could not talk to channel");
-				}
-				else
-					output->put<char>(MP_MSG_SUCCESS);
-			}
-			else
-			{
-				output->put<char>(MP_MSG_FAILURE);
-				output->putString("Invalid channel");
-			}
-
+			Dispatcher::getInstance().addTask(createTask(boost::bind(&ProtocolManager::chat, this, msg.getString(), msg.get<uint16_t>(), (MessageClasses)msg.get<char>(), msg.getString())));
 			break;
-		}
 
 		default:
-		{
-			output->put<char>(MP_MSG_ERROR);
-			output->putString("Unknown command");
+			break;
+	}
+}
 
-			addLogLine(LOGTYPE_WARNING, "Unknown command");
+void ProtocolManager::releaseProtocol()
+{
+	addLogLine(LOGTYPE_EVENT, "Closing protocol");
+	Manager::getInstance()->removeConnection(this);
+	Protocol::releaseProtocol();
+}
+
+#ifdef __DEBUG_NET_DETAIL__
+void ProtocolManager::deleteProtocolTask()
+{
+	std::clog << "Deleting ProtocolManager" << std::endl;
+	Protocol::deleteProtocolTask();
+}
+
+#endif
+void ProtocolManager::pong()
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	msg->put<char>(MP_MSG_PONG);
+}
+
+void ProtocolManager::execute(std::string lua)
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	switch(Manager::getInstance()->execute(lua))
+	{
+		case LUA_TRUE:
+		{
+			msg->put<char>(MP_MSG_SUCCESS);
+			addLogLine(LOGTYPE_EVENT, "Executed Lua script");
+			break;
+		}
+		case LUA_RESERVE:
+		{
+			msg->put<char>(MP_MSG_FAILURE);
+			msg->putString("Unable to reserve enviroment for Lua script");
+			addLogLine(LOGTYPE_ERROR, "Unable to reserve enviroment for Lua script");
+			break;
+		}
+		default:
+		{
+			msg->put<char>(MP_MSG_FAILURE);
+			msg->putString("An error occured while executing Lua script, please check Server Log");
+			addLogLine(LOGTYPE_ERROR, "An error occured while executing Lua script");
 			break;
 		}
 	}
 }
 
-void ProtocolManager::deleteProtocolTask()
+void ProtocolManager::user(uint32_t playerId)
 {
-	addLogLine(LOGTYPE_EVENT, "Closing protocol");
-	Manager::getInstance()->removeConnection(this);
-	Protocol::deleteProtocolTask();
-}
+	if(m_state != LOGGED_IN)
+		return;
 
-void ProtocolManager::output(const std::string& message)
-{
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	if(Player* player = g_game.getPlayerByID(playerId))
+	{
+		msg->put<char>(MP_MSG_USER_DATA);
+		msg->put<uint32_t>(playerId);
+
+		msg->put<int32_t>(player->getGroupId());
+		msg->put<uint32_t>(player->getVocationId());
+
+		msg->put<uint32_t>(player->getLevel());
+		msg->put<uint32_t>(player->getMagicLevel());
+		// TODO: continue...
+	}
+	else
+	{
+		msg->put<char>(MP_MSG_ERROR);
+		msg->putString("Player not found");
+	}
+}
+
+void ProtocolManager::channels()
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	msg->put<char>(MP_MSG_CHAT_LIST);
+	ChannelList list = g_chat.getPublicChannels();
+
+	msg->put<uint16_t>(list.size());
+	for(ChannelList::const_iterator it = list.begin(); it != list.end(); ++it)
+	{
+		msg->put<uint16_t>((*it)->getId());
+		msg->putString((*it)->getName());
+
+		msg->put<uint16_t>((*it)->getFlags());
+		msg->put<uint16_t>((*it)->getUsers().size());
+	}
+}
+
+void ProtocolManager::chat(std::string name, uint16_t channelId, MessageClasses type, std::string message)
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	ChatChannel* channel = NULL;
+	if((channel = g_chat.getChannelById(channelId)) && g_chat.isPublicChannel(channelId))
+	{
+		if(!channel->talk(name, type, message))
+		{
+			msg->put<char>(MP_MSG_FAILURE);
+			msg->putString("Could not talk to channel");
+		}
+		else
+			msg->put<char>(MP_MSG_SUCCESS);
+	}
+	else
+	{
+		msg->put<char>(MP_MSG_ERROR);
+		msg->putString("Invalid channel");
+	}
+}
+
+void ProtocolManager::channel(uint16_t channelId, bool opening)
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	if(opening)
+	{
+		ChatChannel* channel = NULL;
+		if((channel = g_chat.getChannelById(channelId)) && g_chat.isPublicChannel(channelId))
+		{
+			m_channels |= (1 << (uint32_t)channelId);
+			msg->put<char>(MP_MSG_CHAT_USERS);
+			msg->put<uint16_t>(channelId);
+
+			UsersMap users = channel->getUsers();
+			msg->put<uint16_t>(users.size());
+			for(UsersMap::const_iterator it = users.begin(); it != users.end(); ++it)
+				msg->put<uint32_t>(it->first);
+		}
+		else
+		{
+			msg->put<char>(MP_MSG_ERROR);
+			msg->putString("Invalid channel");
+		}
+	}
+	else if(g_chat.getChannelById(channelId) && g_chat.isPublicChannel(channelId))
+	{
+		m_channels &= ~(1 << (uint32_t)channelId);
+		msg->put<char>(MP_MSG_SUCCESS);
+	}
+	else
+	{
+		msg->put<char>(MP_MSG_ERROR);
+		msg->putString("Invalid channel");
+	}
+}
+
+void ProtocolManager::output(const std::string& message)
+{
+	if(m_state != LOGGED_IN)
+		return;
+
+	NetworkMessage_ptr msg = getOutputBuffer();
+	if(!msg)
+		return;
+
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_OUTPUT);
 	msg->putString(message);
 }
 
 void ProtocolManager::addUser(Player* player)
 {
+	if(m_state != LOGGED_IN)
+		return;
+
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_USER_ADD);
 
 	msg->put<uint32_t>(player->getID());
@@ -383,22 +447,31 @@ void ProtocolManager::addUser(Player* player)
 
 void ProtocolManager::removeUser(uint32_t playerId)
 {
+	if(m_state != LOGGED_IN)
+		return;
+
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_USER_REMOVE);
 	msg->put<uint32_t>(playerId);
 }
 
-void ProtocolManager::talk(uint32_t playerId, uint16_t channelId, SpeakClasses type, const std::string& message)
+void ProtocolManager::talk(uint32_t playerId, uint16_t channelId, MessageClasses type, const std::string& message)
 {
+	if(m_state != LOGGED_IN)
+		return;
+
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	if(!(m_channels & (1 << (uint32_t)channelId)))
+		return;
+
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_CHAT_MESSAGE);
 	msg->put<uint32_t>(playerId);
 
@@ -409,11 +482,14 @@ void ProtocolManager::talk(uint32_t playerId, uint16_t channelId, SpeakClasses t
 
 void ProtocolManager::addUser(uint32_t playerId, uint16_t channelId)
 {
+	if(m_state != LOGGED_IN)
+		return;
+
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_CHAT_USER_ADD);
 
 	msg->put<uint32_t>(playerId);
@@ -422,11 +498,14 @@ void ProtocolManager::addUser(uint32_t playerId, uint16_t channelId)
 
 void ProtocolManager::removeUser(uint32_t playerId, uint16_t channelId)
 {
+	if(m_state != LOGGED_IN)
+		return;
+
 	NetworkMessage_ptr msg = getOutputBuffer();
 	if(!msg)
 		return;
 
-	TRACK_MESSAGE(msg)
+	TRACK_MESSAGE(msg);
 	msg->put<char>(MP_MSG_CHAT_USER_REMOVE);
 
 	msg->put<uint32_t>(playerId);
@@ -474,22 +553,26 @@ bool Manager::allow(uint32_t ip) const
 	return false;
 }
 
-bool Manager::execute(const std::string& script)
+LuaReturn_t Manager::execute(const std::string& script)
 {
-	if(!m_interface.reserveEnv())
-		return false;
+	if(!m_interface)
+	{
+		// create upon first execution to save some memory and
+		// avoid any startup crashes related to creation on load
+		m_interface = new LuaInterface("Manager Interface");
+		m_interface->initState();
+	}
 
-	m_interface.loadBuffer(script);
-	m_interface.releaseEnv();
-	return true;
+	if(!m_interface->reserveEnv())
+		return LUA_RESERVE;
+
+	LuaReturn_t tmp = (LuaReturn_t)m_interface->loadBuffer(script);
+	m_interface->releaseEnv();
+	return tmp;
 }
 
-// should we run all these above on dispatcher thread?
 void Manager::output(const std::string& message)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second)
@@ -499,9 +582,6 @@ void Manager::output(const std::string& message)
 
 void Manager::addUser(Player* player)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second)
@@ -511,9 +591,6 @@ void Manager::addUser(Player* player)
 
 void Manager::removeUser(uint32_t playerId)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second)
@@ -521,11 +598,8 @@ void Manager::removeUser(uint32_t playerId)
 	}
 }
 
-void Manager::talk(uint32_t playerId, uint16_t channelId, SpeakClasses type, const std::string& message)
+void Manager::talk(uint32_t playerId, uint16_t channelId, MessageClasses type, const std::string& message)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second && it->first->checkChannel(channelId))
@@ -535,9 +609,6 @@ void Manager::talk(uint32_t playerId, uint16_t channelId, SpeakClasses type, con
 
 void Manager::addUser(uint32_t playerId, uint16_t channelId)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second && it->first->checkChannel(channelId))
@@ -547,14 +618,11 @@ void Manager::addUser(uint32_t playerId, uint16_t channelId)
 
 void Manager::removeUser(uint32_t playerId, uint16_t channelId)
 {
-	if(m_clients.empty())
-		return;
-
 	for(ClientMap::const_iterator it = m_clients.begin(); it != m_clients.end(); ++it)
 	{
 		if(it->second && it->first->checkChannel(channelId))
 			it->first->removeUser(playerId, channelId);
-        }
+	}
 }
 
 void ProtocolManager::addLogLine(LogType_t type, std::string message)

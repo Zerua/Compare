@@ -48,15 +48,15 @@ class Depot : public Container
 		virtual const Creature* getCreature() const {return NULL;}
 
 		virtual ReturnValue __queryAdd(int32_t index, const Thing* thing, uint32_t count,
-			uint32_t flags) const;
+			uint32_t flags, Creature* actor = NULL) const;
 
 		virtual ReturnValue __queryMaxCount(int32_t index, const Thing* thing, uint32_t count,
 			uint32_t& maxQueryCount, uint32_t flags) const;
 
 		virtual void postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
-			int32_t index, cylinderlink_t link = LINK_OWNER);
+			int32_t index, CylinderLink_t link = LINK_OWNER);
 		virtual void postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
-			int32_t index, bool isCompleteRemoval, cylinderlink_t link = LINK_OWNER);
+			int32_t index, bool isCompleteRemoval, CylinderLink_t link = LINK_OWNER);
 
 		//overrides
 		virtual bool canRemove() const {return false;}
@@ -67,9 +67,10 @@ class Depot : public Container
 
 inline uint32_t Depot::getDepotId() const
 {
-	const int32_t* v = getIntegerAttribute("depotid");
-	if(v)
-		return (uint32_t)*v;
+	bool ok;
+	int32_t v = getIntegerAttribute("depotid", ok);
+	if(ok)
+		return (uint32_t)v;
 
 	return 0;
 }

@@ -19,12 +19,16 @@
 
 #include "protocollogin.h"
 #include "tools.h"
+#include "const.h"
 
 #include "iologindata.h"
 #include "ioban.h"
 
 #include "outputmessage.h"
 #include "connection.h"
+#ifdef __LOGIN_SERVER__
+#include "gameservers.h"
+#endif
 
 #include "configmanager.h"
 #include "game.h"
@@ -36,16 +40,16 @@ extern std::list<std::pair<uint32_t, uint32_t> > serverIps;
 
 #ifdef __ENABLE_SERVER_DIAGNOSTIC__
 uint32_t ProtocolLogin::protocolLoginCount = 0;
-#endif
 
+#endif
+#ifdef __DEBUG_NET_DETAIL__
 void ProtocolLogin::deleteProtocolTask()
 {
-#ifdef __DEBUG_NET_DETAIL__
 	std::clog << "Deleting ProtocolLogin" << std::endl;
-#endif
 	Protocol::deleteProtocolTask();
 }
 
+#endif
 void ProtocolLogin::disconnectClient(uint8_t error, const char* message)
 {
 	OutputMessage_ptr output = OutputMessagePool::getInstance()->getOutputMessage(this, false);
@@ -60,23 +64,30 @@ void ProtocolLogin::disconnectClient(uint8_t error, const char* message)
 	getConnection()->close();
 }
 
-bool ProtocolLogin::parseFirstPacket(NetworkMessage& msg)
+void ProtocolLogin::onRecvFirstMessage(NetworkMessage& msg)
 {
 	if(g_game.getGameState() == GAMESTATE_SHUTDOWN)
 	{
 		getConnection()->close();
-		return false;
+		return;
 	}
 
 	uint32_t clientIp = getConnection()->getIP();
-	/*uint16_t operatingSystem = msg.get<uint16_t>();*/msg.skip(2);
+	msg.skip(2); // client platform
 	uint16_t version = msg.get<uint16_t>();
 
+#ifdef CLIENT_VERSION_DATA
+	uint32_t datSignature = msg.get<uint32_t>();
+	uint32_t sprSignature = msg.get<uint32_t>();
+
+	uint32_t picSignature = msg.get<uint32_t>();
+#else
 	msg.skip(12);
+#endif
 	if(!RSA_decrypt(msg))
 	{
 		getConnection()->close();
-		return false;
+		return;
 	}
 
 	uint32_t key[4] = {msg.get<uint32_t>(), msg.get<uint32_t>(), msg.get<uint32_t>(), msg.get<uint32_t>()};
@@ -84,67 +95,74 @@ bool ProtocolLogin::parseFirstPacket(NetworkMessage& msg)
 	setXTEAKey(key);
 
 	std::string name = msg.getString(), password = msg.getString();
-	bool castAccount = false;
-	if(name.empty()) //CA
+	if(name.empty())
 	{
-		if(g_config.getBool(ConfigManager::ENABLE_CAST))
-        	castAccount = true;
- 	    else {
-			if(!g_config.getBool(ConfigManager::ACCOUNT_MANAGER))
-			{
-				disconnectClient(0x0A, "Invalid account name.");
-				return false;
-			}
-
-			name = "1";
-			password = "1";
+		if(!g_config.getBool(ConfigManager::ACCOUNT_MANAGER))
+		{
+			disconnectClient(0x0A, "Invalid account name.");
+			return;
 		}
+
+		name = "1";
+		password = "1";
 	}
 
 	if(version < CLIENT_VERSION_MIN || version > CLIENT_VERSION_MAX)
 	{
 		disconnectClient(0x0A, CLIENT_VERSION_STRING);
-		return false;
+		return;
 	}
+#ifdef CLIENT_VERSION_DATA
+
+	if(sprSignature != CLIENT_VERSION_SPR)
+	{
+		disconnectClient(0x0A, CLIENT_VERSION_DATA);
+		return;
+	}
+
+	if(datSignature != CLIENT_VERSION_DAT)
+	{
+		disconnectClient(0x0A, CLIENT_VERSION_DATA);
+		return;
+	}
+
+	if(picSignature != CLIENT_VERSION_PIC)
+	{
+		disconnectClient(0x0A, CLIENT_VERSION_DATA);
+		return;
+	}
+#endif
 
 	if(g_game.getGameState() < GAMESTATE_NORMAL)
 	{
 		disconnectClient(0x0A, "Server is just starting up, please wait.");
-		return false;
+		return;
 	}
 
 	if(g_game.getGameState() == GAMESTATE_MAINTAIN)
 	{
 		disconnectClient(0x0A, "Server is under maintenance, please re-connect in a while.");
-		return false;
+		return;
 	}
 
 	if(ConnectionManager::getInstance()->isDisabled(clientIp, protocolId))
 	{
 		disconnectClient(0x0A, "Too many connections attempts from your IP address, please try again later.");
-		return false;
+		return;
 	}
 
 	if(IOBan::getInstance()->isIpBanished(clientIp))
 	{
 		disconnectClient(0x0A, "Your IP is banished!");
-		return false;
+		return;
 	}
 
-	uint32_t id = 1;
-	if(!IOLoginData::getInstance()->getAccountId(name, id) && !castAccount) //CA
+	Account account;
+	if(!IOLoginData::getInstance()->loadAccount(account, name) || !encryptTest(account.salt + password, account.password))
 	{
 		ConnectionManager::getInstance()->addAttempt(clientIp, protocolId, false);
-		disconnectClient(0x0A, "Invalid account name.");
-		return false;
-	}
-
-	Account account = IOLoginData::getInstance()->loadAccount(id);
-	if(!encryptTest(account.salt + password, account.password) && !castAccount) //CA
-	{
-		ConnectionManager::getInstance()->addAttempt(clientIp, protocolId, false);
-		disconnectClient(0x0A, "Invalid password.");
-		return false;
+		disconnectClient(0x0A, "Invalid account name or password.");
+		return;
 	}
 
 	Ban ban;
@@ -160,42 +178,46 @@ bool ProtocolLogin::parseFirstPacket(NetworkMessage& msg)
 		else
 			IOLoginData::getInstance()->getNameByGuid(ban.adminId, name_, true);
 
-		char buffer[500 + ban.comment.length()];
-		sprintf(buffer, "Your account has been %s at:\n%s by: %s,\nfor the following reason:\n%s.\nThe action taken was:\n%s.\nThe comment given was:\n%s.\nYour %s%s.",
-			(deletion ? "deleted" : "banished"), formatDateEx(ban.added, "%d %b %Y").c_str(), name_.c_str(),
-			getReason(ban.reason).c_str(), getAction(ban.action, false).c_str(), ban.comment.c_str(),
-			(deletion ? "account won't be undeleted" : "banishment will be lifted at:\n"),
-			(deletion ? "" : formatDateEx(ban.expires).c_str()));
+		std::stringstream ss;
+		ss << "Your account has been " << (deletion ? "deleted" : "banished") << " at:\n" << formatDateEx(ban.added, "%d %b %Y").c_str()
+			<< " by: " << name_.c_str() << ".\nThe comment given was:\n" << ban.comment.c_str() << ".\nYour " << (deletion ?
+			"account won't be undeleted" : "banishment will be lifted at:\n") << (deletion ? "" : formatDateEx(ban.expires).c_str()) << ".";
 
-		disconnectClient(0x0A, buffer);
-		return false;
+		disconnectClient(0x0A, ss.str().c_str());
+		return;
 	}
 
 	// remove premium days
+	#ifndef __LOGIN_SERVER__
 	IOLoginData::getInstance()->removePremium(account);
 	if(!g_config.getBool(ConfigManager::ACCOUNT_MANAGER) && !account.charList.size())
 	{
 		disconnectClient(0x0A, std::string("This account does not contain any character yet.\nCreate a new character on the "
 			+ g_config.getString(ConfigManager::SERVER_NAME) + " website at " + g_config.getString(ConfigManager::URL) + ".").c_str());
-		return false;
+		return;
+	}
+	#else
+	Characters charList;
+	for(Characters::iterator it = account.charList.begin(); it != account.charList.end(); ++it)
+	{
+		if(version >= it->second.server->getVersionMin() && version <= it->second.server->getVersionMax())
+			charList[it->first] = it->second;
 	}
 
-	if(castAccount && !Player::castAutoList.size()) //CA
+	IOLoginData::getInstance()->removePremium(account);
+	if(!g_config.getBool(ConfigManager::ACCOUNT_MANAGER) && !charList.size())
 	{
-		disconnectClient(0x0A, std::string("[Cast System]\nCurrently there are no casts available.").c_str());
-		return false;
+		disconnectClient(0x0A, std::string("This account does not contain any character on this client yet.\nCreate a new character on the "
+			+ g_config.getString(ConfigManager::SERVER_NAME) + " website at " + g_config.getString(ConfigManager::URL) + ".").c_str());
+		return;
 	}
+	#endif
 
 	ConnectionManager::getInstance()->addAttempt(clientIp, protocolId, true);
 	if(OutputMessage_ptr output = OutputMessagePool::getInstance()->getOutputMessage(this, false))
 	{
 		TRACK_MESSAGE(output);
 		output->put<char>(0x14);
-
-		char motd[1300];
-		sprintf(motd, "%d\n%s", g_game.getMotdId(), g_config.getString(ConfigManager::MOTD).c_str());
-		output->putString(motd);
-
 		uint32_t serverIp = serverIps.front().first;
 		for(std::list<std::pair<uint32_t, uint32_t> >::iterator it = serverIps.begin(); it != serverIps.end(); ++it)
 		{
@@ -206,63 +228,64 @@ bool ProtocolLogin::parseFirstPacket(NetworkMessage& msg)
 			break;
 		}
 
+		char motd[1300];
+		sprintf(motd, "%d\n%s", g_game.getMotdId(), g_config.getString(ConfigManager::MOTD).c_str());
+		output->putString(motd);
+
 		//Add char list
 		output->put<char>(0x64);
-		if(castAccount) //CA
-			output->put<char>(Player::castAutoList.size());
-		else if(g_config.getBool(ConfigManager::ACCOUNT_MANAGER) && id != 1)
+		if(g_config.getBool(ConfigManager::ACCOUNT_MANAGER) && account.number != 1)
 		{
 			output->put<char>(account.charList.size() + 1);
 			output->putString("Account Manager");
+
 			output->putString(g_config.getString(ConfigManager::SERVER_NAME));
 			output->put<uint32_t>(serverIp);
-			output->put<uint16_t>(g_config.getNumber(ConfigManager::GAME_PORT));
+
+			IntegerVec games = vectorAtoi(explodeString(g_config.getString(ConfigManager::GAME_PORT), ","));
+			output->put<uint16_t>(games[random_range(0, games.size() - 1)]);
 		}
 		else
 			output->put<char>((uint8_t)account.charList.size());
 
-		if(!castAccount) { //CA
-			for(Characters::iterator it = account.charList.begin(); it != account.charList.end(); ++it)
+		#ifndef __LOGIN_SERVER__
+		for(Characters::iterator it = account.charList.begin(); it != account.charList.end(); ++it)
+		{
+			output->putString((*it));
+			if(g_config.getBool(ConfigManager::ON_OR_OFF_CHARLIST))
 			{
-				#ifndef __LOGIN_SERVER__
-				output->putString((*it));
-				if(g_config.getBool(ConfigManager::ON_OR_OFF_CHARLIST))
-				{
-					if(g_game.getPlayerByName((*it)))
-						output->putString("Online");
-					else
-						output->putString("Offline");
-				}
+				if(g_game.getPlayerByName((*it)))
+					output->putString("Online");
 				else
-					output->putString(g_config.getString(ConfigManager::SERVER_NAME));
-
-				output->put<uint32_t>(serverIp);
-				output->put<uint16_t>(g_config.getNumber(ConfigManager::GAME_PORT));
-				#else
-				if(version < it->second->getVersionMin() || version > it->second->getVersionMax())
-					continue;
-
-				output->putString(it->first);
-				output->putString(it->second->getName());
-				output->put<uint32_t>(it->second->getAddress());
-				output->put<uint16_t>(it->second->getPort());
-				#endif
+					output->putString("Offline");
 			}
-		} else {
-			for(AutoList<Player>::iterator it = Player::castAutoList.begin(); it != Player::castAutoList.end(); ++it)
-			{
-				std::stringstream ss;
-				ss << (it->second->getCastingPassword() == "" ? "" : it->second->getCastingPassword() != password ? "* " : "") << "L." << it->second->getLevel() << " " << it->second->getCastViewerCount() << "/50";
-				output->putString(it->second->getName());
-				output->putString(ss.str().c_str());
-				output->put<uint32_t>(serverIp);
-				output->put<uint16_t>(g_config.getNumber(ConfigManager::GAME_PORT));
-			}
+			else
+				output->putString(g_config.getString(ConfigManager::SERVER_NAME));
+
+			output->put<uint32_t>(serverIp);
+			IntegerVec games = vectorAtoi(explodeString(g_config.getString(ConfigManager::GAME_PORT), ","));
+			output->put<uint16_t>(games[random_range(0, games.size() - 1)]);
 		}
+		#else
+		for(Characters::iterator it = charList.begin(); it != charList.end(); ++it)
+		{
+			output->putString(it->second.name);
+			if(!g_config.getBool(ConfigManager::ON_OR_OFF_CHARLIST) || it->second.status < 0)
+				output->putString(it->second.server->getName());
+			else if(it->second.status)
+				output->putString("Online");
+			else
+				output->putString("Offline");
+
+			output->put<uint32_t>(it->second.server->getAddress());
+			IntegerVec games = it->second.server->getPorts();
+			output->put<uint16_t>(games[random_range(0, games.size() - 1)]);
+		}
+		#endif
 
 		//Add premium days
 		if(g_config.getBool(ConfigManager::FREE_PREMIUM))
-			output->put<uint16_t>(65535); //client displays free premium
+			output->put<uint16_t>(GRATIS_PREMIUM);
 		else
 			output->put<uint16_t>(account.premiumDays);
 
@@ -270,5 +293,4 @@ bool ProtocolLogin::parseFirstPacket(NetworkMessage& msg)
 	}
 
 	getConnection()->close();
-	return true;
 }

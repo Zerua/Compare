@@ -19,8 +19,6 @@
 
 #include "player.h"
 #include "iologindata.h"
-
-#include "depot.h"
 #include "town.h"
 
 #include "configmanager.h"
@@ -29,14 +27,43 @@
 extern ConfigManager g_config;
 extern Game g_game;
 
+ReturnValue Mailbox::canSend(const Item* item, Creature* actor) const
+{
+	if(item->getID() != ITEM_PARCEL && item->getID() != ITEM_LETTER)
+		return RET_NOTPOSSIBLE;
+
+	if(actor)
+	{
+		if(Player* player = actor->getPlayer())
+		{
+			if(player->hasCondition(CONDITION_MUTED, 2))
+				return RET_YOUAREEXHAUSTED;
+
+			if(player->getMailAttempts() >= g_config.getNumber(ConfigManager::MAIL_ATTEMPTS))
+			{
+				if(Condition* condition = Condition::createCondition(CONDITIONID_DEFAULT,
+					CONDITION_MUTED, g_config.getNumber(ConfigManager::MAIL_BLOCK), 0, false, 2))
+				{
+					player->addCondition(condition);
+					player->setLastMail(1); // auto erase
+				}
+
+				return RET_YOUAREEXHAUSTED;
+			}
+
+			player->setLastMail(OTSYS_TIME());
+			player->addMailAttempt();
+		}
+	}
+
+	return RET_NOERROR;
+}
+
 ReturnValue Mailbox::__queryAdd(int32_t, const Thing* thing, uint32_t,
-	uint32_t) const
+	uint32_t, Creature* actor/* = NULL*/) const
 {
 	if(const Item* item = thing->getItem())
-	{
-		if(canSend(item))
-			return RET_NOERROR;
-	}
+		return canSend(item, actor);
 
 	return RET_NOTPOSSIBLE;
 }
@@ -54,7 +81,7 @@ void Mailbox::__addThing(Creature* actor, int32_t, Thing* thing)
 	if(!item)
 		return;
 
-	if(canSend(item))
+	if(canSend(item, actor) == RET_NOERROR)
 		sendItem(actor, item);
 }
 
@@ -70,6 +97,7 @@ bool Mailbox::sendItem(Creature* actor, Item* item)
 
 bool Mailbox::getDepotId(const std::string& townString, uint32_t& depotId)
 {
+
 	Town* town = Towns::getInstance()->getTown(townString);
 	if(!town)
 		return false;
@@ -78,14 +106,8 @@ bool Mailbox::getDepotId(const std::string& townString, uint32_t& depotId)
 	if(disabledTowns.size())
 	{
 		IntegerVec tmpVec = vectorAtoi(explodeString(disabledTowns, ","));
-		if(tmpVec[0] != 0)
-		{
-			for(IntegerVec::iterator it = tmpVec.begin(); it != tmpVec.end(); ++it)
-			{
-				if(town->getID() == uint32_t(*it))
-					return false;
-			}
-		}
+		if(tmpVec[0] != 0 && std::find(tmpVec.begin(), tmpVec.end(), town->getID()) != tmpVec.end())
+			return false;
 	}
 
 	depotId = town->getID();
@@ -111,13 +133,13 @@ bool Mailbox::getRecipient(Item* item, std::string& name, uint32_t& depotId)
 			}
 		}
 	}
-	else if(item->getID() != ITEM_LETTER) /**The item is somehow not a parcel or letter**/
+	else if(item->getID() != ITEM_LETTER) // The item is somehow not a parcel or letter
 	{
 		std::clog << "[Error - Mailbox::getReciver] Trying to get receiver from unkown item with id: " << item->getID() << "!" << std::endl;
 		return false;
 	}
 
-	if(!item || item->getText().empty()) /**No label/letter found or its empty.**/
+	if(!item || item->getText().empty()) // No label or letter found or its empty
 		return false;
 
 	std::istringstream iss(item->getText(), std::istringstream::in);

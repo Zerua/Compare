@@ -14,8 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ////////////////////////////////////////////////////////////////////////
+
 #include "otpch.h"
 #include "otsystem.h"
+#include <signal.h>
 
 #include <iostream>
 #include <fstream>
@@ -27,6 +29,7 @@
 #else
 #include <conio.h>
 #endif
+
 #include <boost/config.hpp>
 
 #include <openssl/rsa.h>
@@ -64,6 +67,9 @@
 #include "outfit.h"
 #include "vocation.h"
 #include "group.h"
+
+#include "quests.h"
+#include "raids.h"
 
 #include "monsters.h"
 #ifdef __OTSERV_ALLOCATOR__
@@ -121,15 +127,16 @@ bool argumentsHandler(StringVec args)
 #endif
 			std::clog << "\t--log=$1\t\tWhole standard output will be logged to\n"
 			"\t\t\t\tthis file.\n"
-			"\t--closed\t\t\tStarts the server as closed.\n";
+			"\t--closed\t\t\tStarts the server as closed.\n"
+			"\t--no-script\t\t\tStarts the server without script system.\n";
 			return false;
 		}
 
-		if((*it) == "--version" || (*it) == "-V")
+		if((*it) == "--version" || (*it) == "-v")
 		{
 			std::clog << SOFTWARE_NAME << ", version " << SOFTWARE_VERSION << " (" << SOFTWARE_CODENAME << ")\n"
-			"Compiled with " << BOOST_COMPILER << " at " << __DATE__ << ", " << __TIME__ << ".\n"
-			"A server developed by Elf, Talaturen, Stian, Slawkens, KaczooH  and Kornholijo.\n"
+			"Compiled with " << BOOST_COMPILER << " (x86_64: " << __x86_64__ << ") at " << __DATE__ << ", " << __TIME__ << ".\n"
+			"A server developed by " << SOFTWARE_DEVELOPERS << ".\n"
 			"Visit our forum for updates, support and resources: http://otland.net.\n";
 			return false;
 		}
@@ -139,6 +146,8 @@ bool argumentsHandler(StringVec args)
 			g_config.setString(ConfigManager::CONFIG_FILE, tmp[1]);
 		else if(tmp[0] == "--data-directory")
 			g_config.setString(ConfigManager::DATA_DIRECTORY, tmp[1]);
+		else if(tmp[0] == "--logs-directory")
+			g_config.setString(ConfigManager::LOGS_DIRECTORY, tmp[1]);
 		else if(tmp[0] == "--ip")
 			g_config.setString(ConfigManager::IP, tmp[1]);
 		else if(tmp[0] == "--login-port")
@@ -152,14 +161,18 @@ bool argumentsHandler(StringVec args)
 		else if(tmp[0] == "--status-port")
 			g_config.setNumber(ConfigManager::STATUS_PORT, atoi(tmp[1].c_str()));
 #ifndef WINDOWS
-		else if(tmp[0] == "--runfile")
+		else if(tmp[0] == "--runfile" || tmp[0] == "--run-file" || tmp[0] == "--pidfile" || tmp[0] == "--pid-file")
 			g_config.setString(ConfigManager::RUNFILE, tmp[1]);
 #endif
 		else if(tmp[0] == "--log")
 			g_config.setString(ConfigManager::OUTPUT_LOG, tmp[1]);
+#ifndef WINDOWS
+		else if(tmp[0] == "--daemon" || tmp[0] == "-d")
+			g_config.setBool(ConfigManager::DAEMONIZE, true);
+#endif
 		else if(tmp[0] == "--closed")
 			g_config.setBool(ConfigManager::START_CLOSED, true);
-		else if(tmp[0] == "--no-script")
+		else if(tmp[0] == "--no-script" || tmp[0] == "--noscript")
 			g_config.setBool(ConfigManager::SCRIPT_SYSTEM, false);
 	}
 
@@ -167,7 +180,7 @@ bool argumentsHandler(StringVec args)
 }
 
 #ifndef WINDOWS
-int32_t getch()
+int32_t OTSYS_getch()
 {
 	struct termios oldt;
 	tcgetattr(STDIN_FILENO, &oldt);
@@ -187,7 +200,7 @@ void signalHandler(int32_t sig)
 	{
 		case SIGHUP:
 			Dispatcher::getInstance().addTask(createTask(
-				boost::bind(&Game::saveGameState, &g_game, false)));
+				boost::bind(&Game::saveGameState, &g_game, (uint8_t)SAVE_PLAYERS | (uint8_t)SAVE_MAP | (uint8_t)SAVE_STATE)));
 			break;
 
 		case SIGTRAP:
@@ -209,7 +222,7 @@ void signalHandler(int32_t sig)
 
 		case SIGCONT:
 			Dispatcher::getInstance().addTask(createTask(
-				boost::bind(&Game::reloadInfo, &g_game, RELOAD_ALL, 0)));
+				boost::bind(&Game::reloadInfo, &g_game, RELOAD_ALL, 0, false)));
 			break;
 
 		case SIGQUIT:
@@ -220,6 +233,9 @@ void signalHandler(int32_t sig)
 		case SIGTERM:
 			Dispatcher::getInstance().addTask(createTask(
 				boost::bind(&Game::shutdown, &g_game)));
+
+			Dispatcher::getInstance().stop();
+			Scheduler::getInstance().stop();
 			break;
 
 		default:
@@ -233,7 +249,7 @@ void runfileHandler(void)
 	runfile.close();
 }
 #else
-int32_t getch()
+int32_t OTSYS_getch()
 {
 	return (int32_t)getchar();
 }
@@ -242,23 +258,24 @@ int32_t getch()
 void allocationHandler()
 {
 	puts("Allocation failed, server out of memory!\nDecrease size of your map or compile in a 64-bit mode.");
-	char buffer[1024];
-	delete fgets(buffer, 1024, stdin);
-	exit(-1);
+	OTSYS_getch();
+	std::exit(-1);
 }
 
 void startupErrorMessage(std::string error = "")
 {
+	// we will get a crash here as the threads aren't going down smoothly
 	if(error.length() > 0)
 		std::clog << std::endl << "> ERROR: " << error << std::endl;
 
-	getch();
-	exit(-1);
+	OTSYS_getch();
+	std::exit(-1);
 }
 
 void otserv(StringVec args, ServiceManager* services);
 int main(int argc, char* argv[])
 {
+	std::srand((uint32_t)OTSYS_TIME());
 	StringVec args = StringVec(argv, argv + argc);
 	if(argc > 1 && !argumentsHandler(args))
 		return 0;
@@ -268,8 +285,8 @@ int main(int argc, char* argv[])
 	g_config.startup();
 
 #ifdef __OTSERV_ALLOCATOR_STATS__
-	boost::thread(boost::bind(&allocatorStatsThread, (void*)NULL));
-	// TODO: shutdown this thread?
+	//boost::thread(boost::bind(&allocatorStatsThread, (void*)NULL));
+	// TODO: this thread needs a shutdown (timed_lock + interrupt? .interrupt + .unlock)
 #endif
 #ifdef __EXCEPTION_TRACER__
 	ExceptionHandler mainExceptionHandler;
@@ -298,16 +315,20 @@ int main(int argc, char* argv[])
 
 	OutputHandler::getInstance();
 	Dispatcher::getInstance().addTask(createTask(boost::bind(otserv, args, &servicer)));
-
 	g_loaderSignal.wait(g_loaderUniqueLock);
-	boost::this_thread::sleep(boost::posix_time::milliseconds(10000));
+
+	boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
 	if(servicer.isRunning())
 	{
+		Status::getInstance();
 		std::clog << ">> " << g_config.getString(ConfigManager::SERVER_NAME) << " server Online!" << std::endl << std::endl;
 		servicer.run();
 	}
 	else
 		std::clog << ">> " << g_config.getString(ConfigManager::SERVER_NAME) << " server Offline! No services available..." << std::endl << std::endl;
+
+	Dispatcher::getInstance().exit();
+	Scheduler::getInstance().exit();
 
 #ifdef __EXCEPTION_TRACER__
 	mainExceptionHandler.RemoveHandler();
@@ -317,7 +338,7 @@ int main(int argc, char* argv[])
 
 void otserv(StringVec, ServiceManager* services)
 {
-	srand((uint32_t)OTSYS_TIME());
+	std::srand((uint32_t)OTSYS_TIME());
 #if defined(WINDOWS)
 	SetConsoleTitle(SOFTWARE_NAME);
 
@@ -328,15 +349,15 @@ void otserv(StringVec, ServiceManager* services)
 	{
 		std::clog << "> WARNING: " << SOFTWARE_NAME << " has been executed as super user! It is "
 			<< "recommended to run as a normal user." << std::endl << "Continue? (y/N)" << std::endl;
-		char buffer = getch();
+		char buffer = OTSYS_getch();
 		if(buffer != 121 && buffer != 89)
 			startupErrorMessage("Aborted.");
 	}
 #endif
 
 	std::clog << SOFTWARE_NAME << ", version " << SOFTWARE_VERSION << " (" << SOFTWARE_CODENAME << ")" << std::endl
-		<< "Compiled with " << BOOST_COMPILER << " at " << __DATE__ << ", " << __TIME__ << "." << std::endl
-		<< "A server developed by Elf, Talaturen, Stian, Slawkens, KaczooH  and Kornholijo." << std::endl
+		<< "Compiled with " << BOOST_COMPILER << " (x86_64: " << __x86_64__ << ") at " << __DATE__ << ", " << __TIME__ << "." << std::endl
+		<< "A server developed by " << SOFTWARE_DEVELOPERS << "." << std::endl
 		<< "Visit our forum for updates, support and resources: http://otland.net." << std::endl << std::endl;
 	std::stringstream ss;
 #ifdef __DEBUG__
@@ -347,9 +368,6 @@ void otserv(StringVec, ServiceManager* services)
 #endif
 #ifdef __DEBUG_CHAT__
 	ss << " CHAT";
-#endif
-#ifdef __DEBUG_EXCEPTION_REPORT__
-	ss << " EXCEPTION-REPORT";
 #endif
 #ifdef __DEBUG_HOUSES__
 	ss << " HOUSES";
@@ -387,6 +405,20 @@ void otserv(StringVec, ServiceManager* services)
 	if(!g_config.load())
 		startupErrorMessage("Unable to load " + g_config.getString(ConfigManager::CONFIG_FILE) + "!");
 
+#ifndef WINDOWS
+	if(g_config.getBool(ConfigManager::DAEMONIZE))
+	{
+		std::clog << "> Daemonization... ";
+		if(fork())
+		{
+			std::clog << "succeed, bye!" << std::endl;
+			exit(0);
+		}
+		else
+			std::clog << "failed, continuing." << std::endl;
+	}
+
+#endif
 	// silently append trailing slash
 	std::string path = g_config.getString(ConfigManager::DATA_DIRECTORY);
 	g_config.setString(ConfigManager::DATA_DIRECTORY, path.erase(path.find_last_not_of("/") + 1) + "/");
@@ -424,7 +456,7 @@ void otserv(StringVec, ServiceManager* services)
 		SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 
 #else
-#ifndef MACOS
+#ifndef __APPLE__
 		cpu_set_t mask;
 		CPU_ZERO(&mask);
 		for(IntegerVec::iterator it = cores.begin(); it != cores.end(); ++it)
@@ -435,7 +467,7 @@ void otserv(StringVec, ServiceManager* services)
 #endif
 
 	std::string runPath = g_config.getString(ConfigManager::RUNFILE);
-	if(runPath != "" && runPath.length() > 2)
+	if(!runPath.empty() && runPath.length() > 2)
 	{
 		std::ofstream runFile(runPath.c_str(), std::ios::trunc | std::ios::out);
 		runFile << getpid();
@@ -466,83 +498,83 @@ void otserv(StringVec, ServiceManager* services)
 		g_config.setNumber(ConfigManager::ENCRYPTION, ENCRYPTION_SHA512);
 		std::clog << "> Using SHA512 encryption" << std::endl;
 	}
-	else if(encryptionType == "vahash")
-	{
-		g_config.setNumber(ConfigManager::ENCRYPTION, ENCRYPTION_VAHASH);
-		std::clog << "> Using VAHash encryption" << std::endl;
-	}
 	else
 	{
 		g_config.setNumber(ConfigManager::ENCRYPTION, ENCRYPTION_PLAIN);
 		std::clog << "> Using plaintext encryption" << std::endl << std::endl
 			<< "> WARNING: This method is completely unsafe!" << std::endl
 			<< "> Please set encryptionType = \"sha1\" (or any other available method) in config.lua" << std::endl;
-		boost::this_thread::sleep(boost::posix_time::seconds(30));
+		boost::this_thread::sleep(boost::posix_time::seconds(15));
 	}
 
 	std::clog << ">> Checking software version...";
-	if(xmlDocPtr doc = xmlParseFile(VERSION_CHECK))
+	if(VERSION_BUILD)
 	{
-		xmlNodePtr p, root = xmlDocGetRootElement(doc);
-		if(!xmlStrcmp(root->name, (const xmlChar*)"versions"))
+		if(xmlDocPtr doc = xmlParseFile(VERSION_CHECK))
 		{
-			p = root->children->next;
-			if(!xmlStrcmp(p->name, (const xmlChar*)"entry"))
+			xmlNodePtr p, root = xmlDocGetRootElement(doc);
+			if(!xmlStrcmp(root->name, (const xmlChar*)"versions"))
 			{
-				std::string version;
-				int32_t patch, build, timestamp;
-
-				bool tmp = false;
-				if(readXMLString(p, "version", version) && version != SOFTWARE_VERSION)
-					tmp = true;
-
-				if(readXMLInteger(p, "patch", patch) && patch > VERSION_PATCH)
-					tmp = true;
-
-				if(readXMLInteger(p, "build", build) && build > VERSION_BUILD)
-					tmp = true;
-
-				if(readXMLInteger(p, "timestamp", timestamp) && timestamp > VERSION_TIMESTAMP)
-					tmp = true;
-
-				if(tmp)
+				p = root->children->next;
+				if(!xmlStrcmp(p->name, (const xmlChar*)"entry"))
 				{
-					std::clog << " ";
-					if(version.find("_SVN") == std::string::npos)
-						std::clog << "running sub version, please mind it's unstable and only for testing purposes!";
-					else
-						std::clog << "outdated, please consider upgrading!";
+					std::string version;
+					int32_t patch, build, timestamp;
 
-					std::clog << std::endl << "> Current version information - version: "
-						<< SOFTWARE_VERSION << ", patch: " << VERSION_PATCH
-						<< ", build: " << VERSION_BUILD << ", timestamp: " << VERSION_TIMESTAMP
-						<< "." << std::endl << "> Latest version information - version: "
-						<< version << ", patch: " << patch << ", build: " << build
-						<< ", timestamp: " << timestamp << "." << std::endl;
-					if(g_config.getBool(ConfigManager::CONFIRM_OUTDATED_VERSION) &&
-						asLowerCaseString(version).find("_svn") == std::string::npos)
+					bool tmp = false;
+					if(readXMLString(p, "version", version) && version != SOFTWARE_VERSION)
+						tmp = true;
+
+					if(readXMLInteger(p, "patch", patch) && patch > VERSION_PATCH)
+						tmp = true;
+
+					if(readXMLInteger(p, "build", build) && build > VERSION_BUILD)
+						tmp = true;
+
+					if(readXMLInteger(p, "timestamp", timestamp) && timestamp > VERSION_TIMESTAMP)
+						tmp = true;
+
+					if(tmp)
 					{
-						std::clog << "Continue? (y/N)" << std::endl;
-						char buffer = getch();
-						if(buffer != 121 && buffer != 89)
-							startupErrorMessage("Aborted.");
+						std::clog << " ";
+						if(version.find("_SVN") == std::string::npos)
+							std::clog << "running sub version, please mind it's unstable and only for testing purposes!";
+						else
+							std::clog << "outdated, please consider upgrading!";
+
+						std::clog << std::endl << "> Current version information - version: "
+							<< SOFTWARE_VERSION << ", patch: " << VERSION_PATCH
+							<< ", build: " << VERSION_BUILD << ", timestamp: " << VERSION_TIMESTAMP
+							<< "." << std::endl << "> Latest version information - version: "
+							<< version << ", patch: " << patch << ", build: " << build
+							<< ", timestamp: " << timestamp << "." << std::endl;
+						if(g_config.getBool(ConfigManager::CONFIRM_OUTDATED_VERSION) &&
+							asLowerCaseString(version).find("_svn") == std::string::npos)
+						{
+							std::clog << "Continue? (y/N)" << std::endl;
+							char buffer = OTSYS_getch();
+							if(buffer != 121 && buffer != 89)
+								startupErrorMessage("Aborted.");
+						}
 					}
+					else
+						std::clog << "up to date!" << std::endl;
 				}
 				else
-					std::clog << "up to date!" << std::endl;
+					std::clog << "failed checking - malformed entry." << std::endl;
 			}
 			else
-				std::clog << "failed checking - malformed entry." << std::endl;
+				std::clog << "failed checking - malformed file." << std::endl;
+
+			xmlFreeDoc(doc);
 		}
 		else
-			std::clog << "failed checking - malformed file." << std::endl;
-
-		xmlFreeDoc(doc);
+			std::clog << "failed - could not parse remote file (are you connected to any network?)" << std::endl;
 	}
 	else
-		std::clog << "failed - could not parse remote file (are you connected to any network?)" << std::endl;
+		std::clog << std::endl << "> Ignoring version check, using SVN" << std::endl;
 
-	std::clog << ">> Loading RSA key" << std::endl;
+	std::clog << ">> Loading RSA key";
 	g_RSA = RSA_new();
 
 	BN_dec2bn(&g_RSA->p, g_config.getString(ConfigManager::RSA_PRIME1).c_str());
@@ -550,19 +582,32 @@ void otserv(StringVec, ServiceManager* services)
 	BN_dec2bn(&g_RSA->d, g_config.getString(ConfigManager::RSA_PRIVATE).c_str());
 	BN_dec2bn(&g_RSA->n, g_config.getString(ConfigManager::RSA_MODULUS).c_str());
 	BN_dec2bn(&g_RSA->e, g_config.getString(ConfigManager::RSA_PUBLIC).c_str());
-	// TODO: dmp1, dmq1, iqmp?
-	
+
 	// This check will verify keys set in config.lua
-	if(!RSA_check_key(g_RSA))
+	if(RSA_check_key(g_RSA))
 	{
-		std::stringstream s;
-		s << "OpenSSL failed - ";
-	
+		std::clog << std::endl << "> Calculating dmp1, dmq1 and iqmp for RSA...";
+
+		// Ok, now we calculate a few things, dmp1, dmq1 and iqmp
+		BN_CTX* ctx = BN_CTX_new();
+		BN_CTX_start(ctx);
+
+		BIGNUM *r1 = BN_CTX_get(ctx), *r2 = BN_CTX_get(ctx);
+		BN_mod(g_RSA->dmp1, g_RSA->d, r1, ctx);
+		BN_mod(g_RSA->dmq1, g_RSA->d, r2, ctx);
+
+		BN_mod_inverse(g_RSA->iqmp, g_RSA->q, g_RSA->p, ctx);
+		std::clog << " done" << std::endl;
+	}
+	else
+	{
 		ERR_load_crypto_strings();
-		s << ERR_error_string(ERR_get_error(), NULL);
+		std::stringstream s;
+
+		s << std::endl << "> OpenSSL failed - " << ERR_error_string(ERR_get_error(), NULL);
 		startupErrorMessage(s.str());
 	}
-	
+
 	std::clog << ">> Starting SQL connection" << std::endl;
 	Database* db = Database::getInstance();
 	if(db && db->isConnected())
@@ -574,7 +619,7 @@ void otserv(StringVec, ServiceManager* services)
 			do
 			{
 				version = DatabaseManager::getInstance()->updateDatabase();
-				if(!version)
+				if(version == 0)
 					break;
 
 				std::clog << "> Database has been updated to version: " << version << "." << std::endl;
@@ -600,7 +645,7 @@ void otserv(StringVec, ServiceManager* services)
 	if(!Item::items.loadFromXml())
 	{
 		std::clog << "Unable to load items (XML)! Continue? (y/N)" << std::endl;
-		char buffer = getch();
+		char buffer = OTSYS_getch();
 		if(buffer != 121 && buffer != 89)
 			startupErrorMessage("Unable to load items (XML)!");
 	}
@@ -644,14 +689,32 @@ void otserv(StringVec, ServiceManager* services)
 	if(!g_game.loadExperienceStages())
 		startupErrorMessage("Unable to load experience stages!");
 
+	std::clog << ">> Loading quests" << std::endl;
+	Quests::getInstance()->loadFromXml();
+
 	std::clog << ">> Loading monsters" << std::endl;
 	if(!g_monsters.loadFromXml())
 	{
 		std::clog << "Unable to load monsters! Continue? (y/N)" << std::endl;
-		char buffer = getch();
+		char buffer = OTSYS_getch();
 		if(buffer != 121 && buffer != 89)
 			startupErrorMessage("Unable to load monsters!");
 	}
+
+	if(fileExists(getFilePath(FILE_TYPE_OTHER, "npc/npcs.xml").c_str()))
+	{
+		std::clog << ">> Loading npcs" << std::endl;
+		if(!g_npcs.loadFromXml())
+		{
+			std::clog << "Unable to load npcs! Continue? (y/N)" << std::endl;
+			char buffer = OTSYS_getch();
+			if(buffer != 121 && buffer != 89)
+				startupErrorMessage("Unable to load npcs!");
+		}
+	}
+
+	std::clog << ">> Loading raids" << std::endl;
+	Raids::getInstance()->loadFromXml();
 
 	std::clog << ">> Loading map and spawns..." << std::endl;
 	if(!g_game.loadMap(g_config.getString(ConfigManager::MAP_NAME)))
@@ -680,28 +743,29 @@ void otserv(StringVec, ServiceManager* services)
 		startupErrorMessage("Unknown world type: " + g_config.getString(ConfigManager::WORLD_TYPE));
 	}
 
-	std::clog << ">> Initializing game state and binding services..." << std::endl;
+	std::clog << ">> Starting to dominate the world... done." << std::endl
+		<< ">> Initializing game state and binding services..." << std::endl;
 	g_game.setGameState(GAMESTATE_INIT);
 	IPAddressList ipList;
 
-	std::string ip = g_config.getString(ConfigManager::IP);
-	if(asLowerCaseString(ip) == "auto")
+	StringVec ip = explodeString(g_config.getString(ConfigManager::IP), ",");
+	if(asLowerCaseString(ip[0]) == "auto")
 	{
 		// TODO: automatic shit
 	}
 
 	IPAddress m_ip;
-	if(ip.size())
+	std::clog << "> Global IP address(es): ";
+	for(StringVec::iterator it = ip.begin(); it != ip.end(); ++it)
 	{
-		std::clog << "> Global IP address: ";
-		uint32_t resolvedIp = inet_addr(ip.c_str());
+		uint32_t resolvedIp = inet_addr(it->c_str());
 		if(resolvedIp == INADDR_NONE)
 		{
-			struct hostent* host = gethostbyname(ip.c_str());
+			struct hostent* host = gethostbyname(it->c_str());
 			if(!host)
 			{
 				std::clog << "..." << std::endl;
-				startupErrorMessage("Cannot resolve " + ip + "!");
+				startupErrorMessage("Cannot resolve " + (*it) + "!");
 			}
 
 			resolvedIp = *(uint32_t*)host->h_addr;
@@ -723,7 +787,7 @@ void otserv(StringVec, ServiceManager* services)
 			if(hostent* host = gethostbyname(hostName))
 			{
 				std::stringstream s;
-				for(uint8_t** addr = (uint8_t**)host->h_addr_list; addr[0] != NULL; addr++)
+				for(uint8_t** addr = (uint8_t**)host->h_addr_list; addr[0]; addr++)
 				{
 					uint32_t resolved = swap_uint32(*(uint32_t*)(*addr));
 					if(m_ip.to_v4().to_ulong() == resolved)
@@ -741,7 +805,6 @@ void otserv(StringVec, ServiceManager* services)
 			}
 		}
 
-		serverIps.push_front(std::make_pair(LOCALHOST, 0xFFFFFFFF));
 		if(m_ip.to_v4().to_ulong() != LOCALHOST)
 			ipList.push_back(boost::asio::ip::address_v4(LOCALHOST));
 	}
@@ -767,10 +830,15 @@ void otserv(StringVec, ServiceManager* services)
 		services->add<ProtocolOldLogin>(g_config.getNumber(ConfigManager::LOGIN_PORT), ipList);
 	}
 
-	services->add<ProtocolGame>(g_config.getNumber(ConfigManager::GAME_PORT), ipList);
 	services->add<ProtocolOldGame>(g_config.getNumber(ConfigManager::LOGIN_PORT), ipList);
-	std::clog << "> Bound ports: ";
+	IntegerVec games = vectorAtoi(explodeString(g_config.getString(ConfigManager::GAME_PORT), ","));
+	for(IntegerVec::const_iterator it = games.begin(); it != games.end(); ++it)
+	{
+		services->add<ProtocolGame>(*it, ipList);
+		break; // CRITICAL: more ports are causing crashes- either find the issue or drop the "feature"
+	}
 
+	std::clog << "> Bound ports: ";
 	std::list<uint16_t> ports = services->getPorts();
 	for(std::list<uint16_t>::iterator it = ports.begin(); it != ports.end(); ++it)
 		std::clog << (*it) << "\t";

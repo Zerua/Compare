@@ -22,22 +22,17 @@
 
 #ifdef __ENABLE_SERVER_DIAGNOSTIC__
 uint32_t ProtocolHTTP::protocolHTTPCount = 0;
-#endif
 
+#endif
+#ifdef __DEBUG_NET_DETAIL__
 void ProtocolHTTP::deleteProtocolTask()
 {
-#ifdef __DEBUG_NET_DETAIL__
 	std::clog << "Deleting ProtocolHTTP" << std::endl;
-#endif
 	Protocol::deleteProtocolTask();
 }
 
-void ProtocolHTTP::disconnectClient()
-{
-	getConnection()->close();
-}
-
-bool ProtocolHTTP::parseFirstPacket(NetworkMessage&)
+#endif
+void ProtocolHTTP::onRecvFirstMessage(NetworkMessage&)
 {
 	if(OutputMessage_ptr output = OutputMessagePool::getInstance()->getOutputMessage(this, false))
 	{
@@ -46,7 +41,7 @@ bool ProtocolHTTP::parseFirstPacket(NetworkMessage&)
 		output->putString("HTTP/1.1 200 OK");
 		output->putString("Date: Fri, 27 Mar 2009 17:28.13 GMT\r\n");
 		output->putString("Server: The Forgotten Server httpd/0.4\r\n");
-		output->putString("Content-Location: filename.html\r\n");
+		output->putString("Content-Location: index.html\r\n");
 		//Vary: negotiate\r\n
 		//TCN: choice\r\n
 		output->putString("Last-Modified: Fri, 27 Mar 2009 17:28.13 GMT\r\n");
@@ -62,5 +57,4 @@ bool ProtocolHTTP::parseFirstPacket(NetworkMessage&)
 	}
 
 	getConnection()->close();
-	return true;
 }

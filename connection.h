@@ -130,6 +130,7 @@ class Connection : public boost::enable_shared_from_this<Connection>, boost::non
 
 		boost::asio::ip::tcp::socket& getHandle() {return *m_socket;}
 		uint32_t getIP() const;
+		uint32_t getEndpoint() const;
 
 		void handle(Protocol* protocol);
 		void accept();

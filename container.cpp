@@ -142,6 +142,10 @@ std::stringstream& Container::getContentDescription(std::stringstream& s) const
 	Container* evil = const_cast<Container*>(this);
 	for(ContainerIterator it = evil->begin(); it != evil->end(); ++it)
 	{
+		Container* tmp = (*it)->getContainer();
+		if(tmp && !tmp->empty())
+			continue;
+
 		if(!begin)
 			s << ", ";
 		else
@@ -264,9 +268,10 @@ void Container::onRemoveContainerItem(uint32_t index, Item* item)
 }
 
 ReturnValue Container::__queryAdd(int32_t index, const Thing* thing, uint32_t count,
-	uint32_t flags) const
+	uint32_t flags, Creature* actor/* = NULL*/) const
 {
-	if(((flags & FLAG_CHILDISOWNER) == FLAG_CHILDISOWNER))
+	bool childIsOwner = hasBitSet(FLAG_CHILDISOWNER, flags);
+	if(childIsOwner)
 	{
 		//a child container is querying, since we are the top container (not carried by a player)
 		//just return with no error.
@@ -297,7 +302,7 @@ ReturnValue Container::__queryAdd(int32_t index, const Thing* thing, uint32_t co
 
 	const Cylinder* topParent = getTopParent();
 	if(topParent != this)
-		return topParent->__queryAdd(INDEX_WHEREEVER, item, count, flags | FLAG_CHILDISOWNER);
+		return topParent->__queryAdd(INDEX_WHEREEVER, item, count, flags | FLAG_CHILDISOWNER, actor);
 
 	return RET_NOERROR;
 }
@@ -338,7 +343,7 @@ ReturnValue Container::__queryMaxCount(int32_t index, const Thing* thing, uint32
 		}
 		else
 		{
-			const Thing* destThing = __getThing(index);
+			const Thing* destThing = __getThing(index-1);
 			const Item* destItem = NULL;
 			if(destThing)
 				destItem = destThing->getItem();
@@ -365,7 +370,7 @@ ReturnValue Container::__queryMaxCount(int32_t index, const Thing* thing, uint32
 	return RET_NOERROR;
 }
 
-ReturnValue Container::__queryRemove(const Thing* thing, uint32_t count, uint32_t flags) const
+ReturnValue Container::__queryRemove(const Thing* thing, uint32_t count, uint32_t flags, Creature*) const
 {
 	int32_t index = __getIndexOfThing(thing);
 	if(index == -1)
@@ -710,7 +715,7 @@ std::map<uint32_t, uint32_t>& Container::__getAllItemTypeCount(std::map<uint32_t
 }
 
 void Container::postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
-	int32_t index, cylinderlink_t/* link = LINK_OWNER*/)
+	int32_t index, CylinderLink_t/* link = LINK_OWNER*/)
 {
 	Cylinder* topParent = getTopParent();
 	if(!topParent->getCreature())
@@ -729,7 +734,7 @@ void Container::postAddNotification(Creature* actor, Thing* thing, const Cylinde
 }
 
 void Container::postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
-	int32_t index, bool isCompleteRemoval, cylinderlink_t/* link = LINK_OWNER*/)
+	int32_t index, bool isCompleteRemoval, CylinderLink_t/* link = LINK_OWNER*/)
 {
 	Cylinder* topParent = getTopParent();
 	if(!topParent->getCreature())
@@ -738,16 +743,13 @@ void Container::postRemoveNotification(Creature* actor, Thing* thing, const Cyli
 		{
 			//let the tile class notify surrounding players
 			if(topParent->getParent())
-				topParent->getParent()->postRemoveNotification(actor, thing,
-					newParent, index, isCompleteRemoval, LINK_NEAR);
+				topParent->getParent()->postRemoveNotification(actor, thing, newParent, index, isCompleteRemoval, LINK_NEAR);
 		}
 		else
-			topParent->postRemoveNotification(actor, thing, newParent,
-				index, isCompleteRemoval, LINK_PARENT);
+			topParent->postRemoveNotification(actor, thing, newParent, index, isCompleteRemoval, LINK_PARENT);
 	}
 	else
-		topParent->postRemoveNotification(actor, thing, newParent,
-			index, isCompleteRemoval, LINK_TOPPARENT);
+		topParent->postRemoveNotification(actor, thing, newParent, index, isCompleteRemoval, LINK_TOPPARENT);
 }
 
 void Container::__internalAddThing(Thing* thing)
@@ -759,7 +761,7 @@ void Container::__internalAddThing(uint32_t
 #ifdef __DEBUG_MOVESYS__
 	index
 #endif
-				, Thing* thing)
+	, Thing* thing)
 {
 #ifdef __DEBUG_MOVESYS__
 	std::clog << "[Container::__internalAddThing] index: " << index << std::endl;
