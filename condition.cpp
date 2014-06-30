@@ -106,7 +106,7 @@ bool Condition::unserializeProp(ConditionAttr_t attr, PropStream& propStream)
 			if(!propStream.getType(value))
 				return false;
 
-			buff = (value != 0);
+			buff = value != 0;
 			return true;
 		}
 
@@ -190,7 +190,7 @@ Condition* Condition::createCondition(ConditionId_t _id, ConditionType_t _type, 
 		case CONDITION_DAZZLED:
 		case CONDITION_CURSED:
 		case CONDITION_DROWN:
-		case CONDITION_BLEEDING:
+		case CONDITION_PHYSICAL:
 			return new ConditionDamage(_id, _type, _buff, _subId);
 
 		case CONDITION_HASTE:
@@ -223,7 +223,6 @@ Condition* Condition::createCondition(ConditionId_t _id, ConditionType_t _type, 
 		case CONDITION_DRUNK:
 		case CONDITION_PACIFIED:
 		case CONDITION_GAMEMASTER:
-		case CONDITION_SPELLCOOLDOWN:
 			return new ConditionGeneric(_id, _type, _ticks, _buff, _subId);
 
 		default:
@@ -271,7 +270,7 @@ Condition* Condition::createCondition(PropStream& propStream)
 	if(!propStream.getLong(_subId))
 		return NULL;
 
-	return createCondition((ConditionId_t)_id, (ConditionType_t)_type, _ticks, 0, (_buff != 0), _subId);
+	return createCondition((ConditionId_t)_id, (ConditionType_t)_type, _ticks, 0, _buff != 0, _subId);
 }
 
 bool Condition::updateCondition(const Condition* addCondition)
@@ -291,7 +290,7 @@ Icons_t Condition::getIcons() const
 ConditionGeneric::ConditionGeneric(ConditionId_t _id, ConditionType_t _type, int32_t _ticks, bool _buff, uint32_t _subId):
 Condition(_id, _type, _ticks, _buff, _subId)
 {
-	// TODO: get rid of this?
+	// TODO: Get rid of this?
 }
 
 void ConditionGeneric::addCondition(Creature*, const Condition* addCondition)
@@ -725,32 +724,20 @@ bool ConditionRegeneration::serialize(PropWriteStream& propWriteStream)
 
 bool ConditionRegeneration::executeCondition(Creature* creature, int32_t interval)
 {
-	internalManaTicks += interval;
 	internalHealthTicks += interval;
+	internalManaTicks += interval;
 	if(creature->getZone() != ZONE_PROTECTION)
 	{
 		if(internalHealthTicks >= healthTicks)
 		{
 			internalHealthTicks = 0;
-			if(healthGain && creature->getHealth() < creature->getMaxHealth())
-			{
-				if(getSubId() != 0)
-					g_game.combatChangeHealth(COMBAT_HEALING, creature, creature, healthGain);
-				else
-					creature->changeHealth(healthGain);
-			}
+			creature->changeHealth(healthGain);
 		}
 
 		if(internalManaTicks >= manaTicks)
 		{
 			internalManaTicks = 0;
-			if(manaGain && creature->getMana() < creature->getMaxMana())
-			{
-				if(getSubId() != 0)
-					g_game.combatChangeMana(creature, creature, manaGain);
-				else
-					creature->changeMana(manaGain);
-			}
+			creature->changeMana(manaGain);
 		}
 	}
 
@@ -901,11 +888,11 @@ bool ConditionDamage::setParam(ConditionParam_t param, int32_t value)
 			return true;
 
 		case CONDITIONPARAM_FORCEUPDATE:
-			forceUpdate = (value != 0);
+			forceUpdate = value;
 			return true;
 
 		case CONDITIONPARAM_DELAYED:
-			delayed = (value != 0);
+			delayed = value;
 			return true;
 
 		case CONDITIONPARAM_MAXVALUE:
@@ -926,10 +913,6 @@ bool ConditionDamage::setParam(ConditionParam_t param, int32_t value)
 
 		case CONDITIONPARAM_PERIODICDAMAGE:
 			periodDamage = value;
-			break;
-
-		case CONDITIONPARAM_FIELD:
-			field = (value != 0);
 			break;
 
 		default:
@@ -1169,12 +1152,9 @@ bool ConditionDamage::doDamage(Creature* creature, int32_t damage)
 	if(creature->isSuppress(getType()))
 		return true;
 
-	Creature* attacker = g_game.getCreatureByID(owner);
-	if(damage < 0 && attacker && attacker->getPlayer() && creature->getPlayer() && creature->getPlayer()->getSkull() != SKULL_BLACK)
-		damage = damage / 2;
-
 	CombatType_t combatType = Combat::ConditionToDamageType(conditionType);
-	if(g_game.combatBlockHit(combatType, attacker, creature, damage, false, false, field))
+	Creature* attacker = g_game.getCreatureByID(owner);
+	if(g_game.combatBlockHit(combatType, attacker, creature, damage, false, false))
 		return false;
 
 	return g_game.combatChangeHealth(combatType, attacker, creature, damage);
@@ -1266,9 +1246,6 @@ Icons_t ConditionDamage::getIcons() const
 		case CONDITION_DROWN:
 			return ICON_DROWNING;
 
-		case CONDITION_BLEEDING:
-			return ICON_BLEED;
-
 		default:
 			break;
 	}
@@ -1278,23 +1255,14 @@ Icons_t ConditionDamage::getIcons() const
 
 void ConditionDamage::generateDamageList(int32_t amount, int32_t start, std::list<int32_t>& list)
 {
-	amount = std::abs(amount);
-	start = std::abs(start);
-	if(start >= amount)
-	{
-		list.push_back(start);
-		return;
-	}
-
 	int32_t sum = 0, med = 0;
 	float x1, x2;
+
+	amount = std::abs(amount);
 	for(int32_t i = start; i > 0; --i)
 	{
 		med = ((start + 1 - i) * amount) / start;
-		x1 = std::fabs(1.0 - (((float)sum) + i) / med);
-		x2 = std::fabs(1.0 - (((float)sum) / med));
-
-		while(x1 < x2)
+		do
 		{
 			sum += i;
 			list.push_back(i);
@@ -1302,6 +1270,7 @@ void ConditionDamage::generateDamageList(int32_t amount, int32_t start, std::lis
 			x1 = std::fabs(1.0 - (((float)sum) + i) / med);
 			x2 = std::fabs(1.0 - (((float)sum) / med));
 		}
+		while(x1 < x2);
 	}
 }
 
@@ -1447,8 +1416,8 @@ bool ConditionSpeed::startCondition(Creature* creature)
 
 void ConditionSpeed::endCondition(Creature* creature, ConditionEnd_t reason)
 {
-	ConditionOutfit::endCondition(creature, reason);
 	g_game.changeSpeed(creature, -speedDelta);
+	ConditionOutfit::endCondition(creature, reason);
 }
 
 void ConditionSpeed::addCondition(Creature* creature, const Condition* addCondition)

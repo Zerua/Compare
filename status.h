@@ -58,14 +58,11 @@ class ProtocolStatus : public Protocol
 		enum {protocolId = 0xFF};
 		enum {isSingleSocket = false};
 		enum {hasChecksum = false};
-
 		static const char* protocolName() {return "status protocol";}
 
 	protected:
 		static IpConnectMap ipConnectMap;
-		#ifdef __DEBUG_NET_DETAIL__
 		virtual void deleteProtocolTask();
-		#endif
 };
 
 class Status

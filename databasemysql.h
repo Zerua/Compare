@@ -18,17 +18,11 @@
 #ifndef __DATABASEMYSQL__
 #define __DATABASEMYSQL__
 
-#ifdef __USE_MYSQL__
 #ifndef __DATABASE__
 #error "database.h should be included first."
 #endif
 
-#ifdef _MSC_VER
-#include <mysql.h>
-#else
 #include <mysql/mysql.h>
-#endif
-
 #if defined WINDOWS
 #include <winsock2.h>
 #endif
@@ -41,27 +35,25 @@ class DatabaseMySQL : public _Database
 		DatabaseMySQL();
 		DATABASE_VIRTUAL ~DatabaseMySQL();
 
-		DATABASE_VIRTUAL bool connect(bool _reconnect);
-		DATABASE_VIRTUAL bool multiLine() const {return true;}
+		DATABASE_VIRTUAL bool getParam(DBParam_t param);
 
 		DATABASE_VIRTUAL bool beginTransaction() {return query("BEGIN");}
 		DATABASE_VIRTUAL bool rollback();
 		DATABASE_VIRTUAL bool commit();
 
-		DATABASE_VIRTUAL bool query(std::string query);
-		DATABASE_VIRTUAL DBResult* storeQuery(std::string query);
+		DATABASE_VIRTUAL bool query(const std::string& query);
+		DATABASE_VIRTUAL DBResult* storeQuery(const std::string& query);
 
-		DATABASE_VIRTUAL std::string escapeString(std::string s) {return escapeBlob(s.c_str(), s.length());}
+		DATABASE_VIRTUAL std::string escapeString(const std::string &s) {return escapeBlob(s.c_str(), s.length());}
 		DATABASE_VIRTUAL std::string escapeBlob(const char* s, uint32_t length);
 
-		DATABASE_VIRTUAL uint64_t getLastInsertId() {return (uint64_t)mysql_insert_id(m_handle);}
+		DATABASE_VIRTUAL uint64_t getLastInsertId() {return (uint64_t)mysql_insert_id(&m_handle);}
 		DATABASE_VIRTUAL DatabaseEngine_t getDatabaseEngine() {return DATABASE_ENGINE_MYSQL;}
 
 	protected:
 		DATABASE_VIRTUAL void keepAlive();
 
-		MYSQL* m_handle;
-		uint16_t m_attempts;
+		MYSQL m_handle;
 		uint32_t m_timeoutTask;
 };
 
@@ -87,5 +79,4 @@ class MySQLResult : public _DBResult
 		MYSQL_RES* m_handle;
 		MYSQL_ROW m_row;
 };
-#endif
 #endif

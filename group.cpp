@@ -52,7 +52,7 @@ bool Groups::loadFromXml()
 		return false;
 	}
 
-	xmlNodePtr root = xmlDocGetRootElement(doc);
+	xmlNodePtr p, root = xmlDocGetRootElement(doc);
 	if(xmlStrcmp(root->name,(const xmlChar*)"groups"))
 	{
 		std::clog << "[Error - Groups::loadFromXml] Malformed groups file." << std::endl;
@@ -60,8 +60,12 @@ bool Groups::loadFromXml()
 		return false;
 	}
 
-	for(xmlNodePtr p = root->children; p; p = p->next)
+	p = root->children;
+	while(p)
+	{
 		parseGroupNode(p);
+		p = p->next;
+	}
 
 	xmlFreeDoc(doc);
 	return true;
@@ -139,7 +143,7 @@ int32_t Groups::getGroupId(const std::string& name)
 {
 	for(GroupsMap::iterator it = groupsMap.begin(); it != groupsMap.end(); ++it)
 	{
-		if(boost::algorithm::iequals(it->second->getName(), name))
+		if(!strcasecmp(it->second->getName().c_str(), name.c_str()))
 			return it->first;
 	}
 
@@ -151,8 +155,7 @@ uint32_t Group::getDepotLimit(bool premium) const
 	if(m_depotLimit > 0)
 		return m_depotLimit;
 
-	return (premium ? g_config.getNumber(ConfigManager::DEFAULT_DEPOT_SIZE_PREMIUM)
-		: g_config.getNumber(ConfigManager::DEFAULT_DEPOT_SIZE));
+	return (premium ? 2000 : 1000);
 }
 
 uint32_t Group::getMaxVips(bool premium) const

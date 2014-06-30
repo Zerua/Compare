@@ -15,7 +15,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ////////////////////////////////////////////////////////////////////////
 #include "otpch.h"
-
 #include "const.h"
 
 #include "actions.h"
@@ -72,6 +71,7 @@ void Actions::clear()
 	clearMap(actionItemMap);
 
 	m_interface.reInitState();
+
 	delete defaultAction;
 	defaultAction = NULL;
 }
@@ -101,8 +101,7 @@ bool Actions::registerEvent(Event* event, xmlNodePtr p, bool override)
 			defaultAction = action;
 		}
 		else
-			std::clog << "[Warning - Actions::registerEvent] You cannot define more than one default action, if you want to do so "
-                << "Please define \"override\"." << std::endl;
+			std::clog << "[Warning - Actions::registerEvent] You cannot define more than one default action." << std::endl;
 
 		return true;
 	}
@@ -253,7 +252,7 @@ bool Actions::registerEvent(Event* event, xmlNodePtr p, bool override)
 				"\", to unique: \"" << endValue << "\")" << std::endl;
 	}
 
-	if(readXMLString(p, "actionid", strValue) || readXMLString(p, "aid", strValue))
+	if(readXMLString(p, "actionid", strValue))
 	{
 		IntegerVec intVector;
 		if(!parseIntegerVec(strValue, intVector))
@@ -343,17 +342,10 @@ ReturnValue Actions::canUse(const Player* player, const Position& pos)
 	if(!Position::areInRange<1,1,0>(playerPos, pos))
 		return RET_TOOFARAWAY;
 
-	Tile* tile = g_game.getTile(pos);
-	if(tile)
-	{
-		HouseTile* houseTile = tile->getHouseTile();
-		if(houseTile && houseTile->getHouse() && !houseTile->getHouse()->isInvited(player))
-			return RET_PLAYERISNOTINVITED;
-	}
 	return RET_NOERROR;
 }
 
-ReturnValue Actions::canUseEx(const Player* player, const Position& pos, const Item* item)
+ReturnValue Actions::canUse(const Player* player, const Position& pos, const Item* item)
 {
 	Action* action = NULL;
 	if((action = getAction(item, ACTION_UNIQUEID)))
@@ -395,7 +387,7 @@ ReturnValue Actions::canUseFar(const Creature* creature, const Position& toPos, 
 	return RET_NOERROR;
 }
 
-Action* Actions::getAction(const Item* item, ActionType_t type) const
+Action* Actions::getAction(const Item* item, ActionType_t type/* = ACTION_ANY*/) const
 {
 	if(item->getUniqueId() && (type == ACTION_ANY || type == ACTION_UNIQUEID))
 	{
@@ -449,32 +441,72 @@ ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_
 	Action* action = NULL;
 	if((action = getAction(item, ACTION_UNIQUEID)))
 	{
-		if(executeUse(action, player, item, posEx, creatureId))
-			return RET_NOERROR;
+		if(action->isScripted())
+		{
+			if(executeUse(action, player, item, posEx, creatureId))
+				return RET_NOERROR;
+		}
+		else if(action->function)
+		{
+			if(action->function(player, item, posEx, posEx, false, creatureId))
+				return RET_NOERROR;
+		}
 	}
 
 	if((action = getAction(item, ACTION_ACTIONID)))
 	{
-		if(executeUse(action, player, item, posEx, creatureId))
-			return RET_NOERROR;
+		if(action->isScripted())
+		{
+			if(executeUse(action, player, item, posEx, creatureId))
+				return RET_NOERROR;
+		}
+		else if(action->function)
+		{
+			if(action->function(player, item, posEx, posEx, false, creatureId))
+				return RET_NOERROR;
+		}
 	}
 
 	if((action = getAction(item, ACTION_ITEMID)))
 	{
-		if(executeUse(action, player, item, posEx, creatureId))
-			return RET_NOERROR;
+		if(action->isScripted())
+		{
+			if(executeUse(action, player, item, posEx, creatureId))
+				return RET_NOERROR;
+		}
+		else if(action->function)
+		{
+			if(action->function(player, item, posEx, posEx, false, creatureId))
+				return RET_NOERROR;
+		}
 	}
 
 	if((action = getAction(item, ACTION_RUNEID)))
 	{
-		if(executeUse(action, player, item, posEx, creatureId))
-			return RET_NOERROR;
+		if(action->isScripted())
+		{
+			if(executeUse(action, player, item, posEx, creatureId))
+				return RET_NOERROR;
+		}
+		else if(action->function)
+		{
+			if(action->function(player, item, posEx, posEx, false, creatureId))
+				return RET_NOERROR;
+		}
 	}
 
 	if(defaultAction)
 	{
-		if(executeUse(defaultAction, player, item, posEx, creatureId))
-			return RET_NOERROR;
+		if(defaultAction->isScripted())
+		{
+			if(executeUse(defaultAction, player, item, posEx, creatureId))
+				return RET_NOERROR;
+		}
+		else if(defaultAction->function)
+		{
+			if(defaultAction->function(player, item, posEx, posEx, false, creatureId))
+				return RET_NOERROR;
+		}
 	}
 
 	if(BedItem* bed = item->getBed())
@@ -540,25 +572,6 @@ ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_
 		return RET_NOERROR;
 	}
 
-	const ItemType& it = Item::items[item->getID()];
-	if(it.transformUseTo)
-	{
-		g_game.transformItem(item, it.transformUseTo);
-		g_game.startDecay(item);
-		return RET_NOERROR;
-	}
-
-	if(item->isPremiumScroll())
-	{
-		std::stringstream ss;
-		ss << " You have recived " << it.premiumDays << " premium days.";
-		player->sendTextMessage(MSG_INFO_DESCR, ss.str());
-
-		player->addPremiumDays(it.premiumDays);
-		g_game.internalRemoveItem(NULL, item, 1);
-		return RET_NOERROR;
-	}
-
 	return RET_CANNOTUSETHISOBJECT;
 }
 
@@ -569,7 +582,7 @@ bool Actions::useItem(Player* player, const Position& pos, uint8_t index, Item* 
 
 	player->setNextActionTask(NULL);
 	player->stopWalk();
-	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::ACTIONS_DELAY_INTERVAL) - 10);
+	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::ACTIONS_DELAY_INTERVAL) - SCHEDULER_MINTICKS);
 
 	ReturnValue ret = internalUseItem(player, pos, index, item, 0);
 	if(ret == RET_NOERROR)
@@ -657,7 +670,13 @@ bool Actions::useItemEx(Player* player, const Position& fromPos, const Position&
 
 	player->setNextActionTask(NULL);
 	player->stopWalk();
-	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::EX_ACTIONS_DELAY_INTERVAL) - 10);
+	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::EX_ACTIONS_DELAY_INTERVAL) - SCHEDULER_MINTICKS);
+
+	if(!getAction(item))
+	{
+		player->sendCancelMessage(RET_CANNOTUSETHISOBJECT);
+		return false;
+	}
 
 	int32_t fromStackPos = 0;
 	if(item->getParent())
@@ -700,15 +719,49 @@ bool Action::configureEvent(xmlNodePtr p)
 	return true;
 }
 
-ReturnValue Action::canExecuteAction(const Player* player, const Position& pos)
+bool Action::loadFunction(const std::string& functionName)
 {
-	if(player->hasCustomFlag(PlayerCustomFlag_CanUseFar))
-		return RET_NOERROR;
+	std::string tmpFunctionName = asLowerCaseString(functionName);
+	if(tmpFunctionName == "increaseitemid")
+		function = increaseItemId;
+	else if(tmpFunctionName == "decreaseitemid")
+		function = decreaseItemId;
+	else
+	{
+		std::clog << "[Warning - Action::loadFunction] Function \"" << functionName << "\" does not exist." << std::endl;
+		return false;
+	}
 
+	m_scripted = EVENT_SCRIPT_FALSE;
+	return true;
+}
+
+bool Action::increaseItemId(Player* player, Item* item, const PositionEx&, const PositionEx&, bool, uint32_t)
+{
+	if(!player || !item)
+		return false;
+
+	g_game.transformItem(item, item->getID() + 1);
+	g_game.startDecay(item);
+	return true;
+}
+
+bool Action::decreaseItemId(Player* player, Item* item, const PositionEx&, const PositionEx&, bool, uint32_t)
+{
+	if(!player || !item)
+		return false;
+
+	g_game.transformItem(item, item->getID() - 1);
+	g_game.startDecay(item);
+	return true;
+}
+
+ReturnValue Action::canExecuteAction(const Player* player, const Position& toPos)
+{
 	if(!getAllowFarUse())
-		return g_actions->canUse(player, pos);
+		return g_actions->canUse(player, toPos);
 
-	return g_actions->canUseFar(player, pos, getCheckLineOfSight());
+	return g_actions->canUseFar(player, toPos, getCheckLineOfSight());
 }
 
 bool Action::executeUse(Player* player, Item* item, const PositionEx& fromPos, const PositionEx& toPos, bool extendedUse, uint32_t)
@@ -738,9 +791,7 @@ bool Action::executeUse(Player* player, Item* item, const PositionEx& fromPos, c
 				env->streamPosition(scriptstream, "toPosition", PositionEx());
 			}
 
-			if(m_scriptData)
-				scriptstream << *m_scriptData;
-
+			scriptstream << m_scriptData;
 			bool result = true;
 			if(m_interface->loadBuffer(scriptstream.str()))
 			{

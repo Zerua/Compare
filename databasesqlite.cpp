@@ -15,7 +15,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ////////////////////////////////////////////////////////////////////////
 #include "otpch.h"
-#ifdef __USE_SQLITE__
 #include <iostream>
 #include <boost/regex.hpp>
 
@@ -28,12 +27,14 @@
 extern ConfigManager g_config;
 
 #if SQLITE_VERSION_NUMBER < 3003009
-#define sqlite3_prepare_v2 sqlite3_prepare
+#define OTSYS_SQLITE3_PREPARE sqlite3_prepare
+#else
+#define OTSYS_SQLITE3_PREPARE sqlite3_prepare_v2
 #endif
 
-DatabaseSQLite::DatabaseSQLite() :
-	m_handle(NULL)
+DatabaseSQLite::DatabaseSQLite()
 {
+	m_connected = false;
 	// test for existence of database file;
 	// sqlite3_open will create a new one if it isn't there (what we don't want)
 	if(!fileExists(g_config.getString(ConfigManager::SQL_FILE).c_str()))
@@ -42,11 +43,23 @@ DatabaseSQLite::DatabaseSQLite() :
 	// Initialize sqlite
 	if(sqlite3_open(g_config.getString(ConfigManager::SQL_FILE).c_str(), &m_handle) != SQLITE_OK)
 	{
-		std::clog << "Failed to initialize SQLite connection: " << sqlite3_errmsg(m_handle) << " (" << sqlite3_errcode(m_handle) << ")" << std::endl;
+		std::clog << "Failed to initialize SQLite connection." << std::endl;
 		sqlite3_close(m_handle);
 	}
 	else
 		m_connected = true;
+}
+
+bool DatabaseSQLite::getParam(DBParam_t param)
+{
+	switch(param)
+	{
+		case DBPARAM_MULTIINSERT:
+		default:
+			break;
+	}
+
+	return false;
 }
 
 std::string DatabaseSQLite::_parse(const std::string& s)
@@ -55,7 +68,7 @@ std::string DatabaseSQLite::_parse(const std::string& s)
 	query.reserve(s.size());
 
 	bool inString = false;
-	for(uint32_t i = 0; i < s.length(); ++i)
+	for(uint32_t i = 0; i < s.length(); i++)
 	{
 		uint8_t ch = s[i];
 		if(ch == '\'')
@@ -75,7 +88,7 @@ std::string DatabaseSQLite::_parse(const std::string& s)
 	return query;
 }
 
-bool DatabaseSQLite::query(std::string query)
+bool DatabaseSQLite::query(const std::string& query)
 {
 	boost::recursive_mutex::scoped_lock lockClass(sqliteLock);
 	if(!m_connected)
@@ -87,10 +100,10 @@ bool DatabaseSQLite::query(std::string query)
 #endif
 	sqlite3_stmt* stmt;
 	// prepares statement
-	if(sqlite3_prepare_v2(m_handle, buf.c_str(), buf.length(), &stmt, NULL) != SQLITE_OK)
+	if(OTSYS_SQLITE3_PREPARE(m_handle, buf.c_str(), buf.length(), &stmt, NULL) != SQLITE_OK)
 	{
 		sqlite3_finalize(stmt);
-		std::clog << "sqlite3_prepare_v2(): SQLITE ERROR: " << sqlite3_errmsg(m_handle)  << " (" << buf << ")" << std::endl;
+		std::clog << "OTSYS_SQLITE3_PREPARE(): SQLITE ERROR: " << sqlite3_errmsg(m_handle)  << " (" << buf << ")" << std::endl;
 		return false;
 	}
 
@@ -109,7 +122,7 @@ bool DatabaseSQLite::query(std::string query)
 	return true;
 }
 
-DBResult* DatabaseSQLite::storeQuery(std::string query)
+DBResult* DatabaseSQLite::storeQuery(const std::string& query)
 {
 	boost::recursive_mutex::scoped_lock lockClass(sqliteLock);
 	if(!m_connected)
@@ -121,10 +134,10 @@ DBResult* DatabaseSQLite::storeQuery(std::string query)
 #endif
 	sqlite3_stmt* stmt;
 	// prepares statement
-	if(sqlite3_prepare_v2(m_handle, buf.c_str(), buf.length(), &stmt, NULL) != SQLITE_OK)
+	if(OTSYS_SQLITE3_PREPARE(m_handle, buf.c_str(), buf.length(), &stmt, NULL) != SQLITE_OK)
 	{
 		sqlite3_finalize(stmt);
-		std::clog << "sqlite3_prepare_v2(): SQLITE ERROR: " << sqlite3_errmsg(m_handle)  << " (" << buf << ")" << std::endl;
+		std::clog << "OTSYS_SQLITE3_PREPARE(): SQLITE ERROR: " << sqlite3_errmsg(m_handle)  << " (" << buf << ")" << std::endl;
 		return NULL;
 	}
 
@@ -132,16 +145,16 @@ DBResult* DatabaseSQLite::storeQuery(std::string query)
 	return verifyResult(result);
 }
 
-std::string DatabaseSQLite::escapeString(std::string s)
+std::string DatabaseSQLite::escapeString(const std::string& s)
 {
 	// remember about quoiting even an empty string!
 	if(!s.size())
 		return std::string("''");
 
 	// the worst case is 2n + 3
-	char* output = new char[(s.length() << 1) + 3];
+	char* output = new char[s.length() * 2 + 3];
 	// quotes escaped string and frees temporary buffer
-	sqlite3_snprintf((s.length() << 1) + 1, output, "%Q", s.c_str());
+	sqlite3_snprintf(s.length() * 2 + 1, output, "%Q", s.c_str());
 
 	std::string r(output);
 	delete[] output;
@@ -159,7 +172,7 @@ std::string DatabaseSQLite::escapeBlob(const char* s, uint32_t length)
 {
 	std::string buf = "x'";
 	char* hex = new char[2 + 1]; //need one extra byte for null-character
-	for(uint32_t i = 0; i < length; ++i)
+	for(uint32_t i = 0; i < length; i++)
 	{
 		sprintf(hex, "%02x", ((uint8_t)s[i]));
 		buf += hex;
@@ -227,7 +240,6 @@ void SQLiteResult::free()
 
 	sqlite3_finalize(m_handle);
 	m_handle = NULL;
-
 	m_listNames.clear();
 	delete this;
 }
@@ -247,8 +259,9 @@ SQLiteResult::SQLiteResult(sqlite3_stmt* stmt)
 		return;
 
 	m_handle = stmt;
+	m_listNames.clear();
+
 	int32_t fields = sqlite3_column_count(m_handle);
-	for(int32_t i = 0; i < fields; ++i)
+	for(int32_t i = 0; i < fields; i++)
 		m_listNames[sqlite3_column_name(m_handle, i)] = i;
 }
-#endif

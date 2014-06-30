@@ -79,7 +79,7 @@ class Container : public Item, public Cylinder
 			if(maxSize)
 				return itemlist.size() >= maxSize;
 
-			return true;
+			return 255;
 		}
 		bool empty() const {return itemlist.empty();}
 
@@ -112,10 +112,10 @@ class Container : public Item, public Cylinder
 		virtual const Creature* getCreature() const {return NULL;}
 
 		virtual ReturnValue __queryAdd(int32_t index, const Thing* thing, uint32_t count,
-			uint32_t flags, Creature* actor = NULL) const;
+			uint32_t flags) const;
 		virtual ReturnValue __queryMaxCount(int32_t index, const Thing* thing, uint32_t count, uint32_t& maxQueryCount,
 			uint32_t flags) const;
-		virtual ReturnValue __queryRemove(const Thing* thing, uint32_t count, uint32_t flags, Creature* actor = NULL) const;
+		virtual ReturnValue __queryRemove(const Thing* thing, uint32_t count, uint32_t flags) const;
 		virtual Cylinder* __queryDestination(int32_t& index, const Thing* thing, Item** destItem,
 			uint32_t& flags);
 
@@ -137,9 +137,9 @@ class Container : public Item, public Cylinder
 		virtual std::map<uint32_t, uint32_t>& __getAllItemTypeCount(std::map<uint32_t, uint32_t>& countMap) const;
 
 		virtual void postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
-			int32_t index, CylinderLink_t link = LINK_OWNER);
+			int32_t index, cylinderlink_t link = LINK_OWNER);
 		virtual void postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
-			int32_t index, bool isCompleteRemoval, CylinderLink_t link = LINK_OWNER);
+			int32_t index, bool isCompleteRemoval, cylinderlink_t link = LINK_OWNER);
 
 		virtual void __internalAddThing(Thing* thing);
 		virtual void __internalAddThing(uint32_t index, Thing* thing);

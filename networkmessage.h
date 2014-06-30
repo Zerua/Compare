@@ -80,8 +80,8 @@ class NetworkMessage
 			m_size += sizeof(T);
 		}
 
-		void putString(const std::string& value, bool addSize = true) {putString(value.c_str(), value.length(), addSize);}
-		void putString(const char* value, int length, bool addSize = true);
+		void putString(const std::string& value, bool addSize = true) {putString(value.c_str(), addSize);}
+		void putString(const char* value, bool addSize = true);
 
 		void putPadding(uint32_t amount);
 
@@ -107,15 +107,15 @@ class NetworkMessage
 			m_position = NETWORK_HEADER_SIZE;
 			return (char*)&m_buffer[NETWORK_HEADER_SIZE];
 		}
-
+		
 #ifdef __TRACK_NETWORK__
-		virtual void track(std::string file, int32_t line, std::string func) {}
+		virtual void Track(std::string file, int32_t line, std::string func) {}
 		virtual void clearTrack() {}
 
 #endif
 	protected:
 		// used to check available space while writing
-		inline bool hasSpace(int32_t size) const {return (size + m_position < NETWORK_MAX_SIZE - 16);}
+		inline bool hasSpace(int32_t size) {return (size + m_position < NETWORK_MAX_SIZE - 16);}
 
 		// message propeties
 		uint16_t m_size;

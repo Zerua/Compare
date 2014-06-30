@@ -59,7 +59,7 @@ bool Spawns::loadFromXml(const std::string& _filename)
 		return false;
 	}
 
-	xmlNodePtr root = xmlDocGetRootElement(doc);
+	xmlNodePtr spawnNode, root = xmlDocGetRootElement(doc);
 	if(xmlStrcmp(root->name,(const xmlChar*)"spawns"))
 	{
 		std::clog << "[Error - Spawns::loadFromXml] Malformed spawns file." << std::endl;
@@ -67,8 +67,8 @@ bool Spawns::loadFromXml(const std::string& _filename)
 		return false;
 	}
 
-	for(xmlNodePtr p = root->children; p; p = p->next)
-		parseSpawnNode(p, false);
+	for(spawnNode = root->children; spawnNode; spawnNode = spawnNode->next)
+		parseSpawnNode(spawnNode, false);
 
 	xmlFreeDoc(doc);
 	loaded = true;
@@ -137,7 +137,7 @@ bool Spawns::parseSpawnNode(xmlNodePtr p, bool checkDuplicate)
 				if(intValue <= interval)
 				{
 					std::clog << "[Warning - Spawns::loadFromXml] " << name << " " << centerPos << " spawntime cannot"
-						<< " be less or equal than " << interval << " seconds." << std::endl;
+						<< " be less than " << interval << " seconds." << std::endl;
 					continue;
 				}
 
@@ -309,10 +309,9 @@ bool Spawn::spawnMonster(uint32_t spawnId, MonsterType* mType, const Position& p
 
 void Spawn::startup()
 {
-	spawnBlock_t sb;
 	for(SpawnMap::iterator it = spawnMap.begin(); it != spawnMap.end(); ++it)
 	{
-		sb = it->second;
+		spawnBlock_t& sb = it->second;
 		spawnMonster(it->first, sb.mType, sb.pos, sb.direction, true);
 	}
 }
@@ -322,43 +321,51 @@ void Spawn::checkSpawn()
 #ifdef __DEBUG_SPAWN__
 	std::clog << "[Notice] Spawn::checkSpawn " << this << std::endl;
 #endif
+	Monster* monster;
+	uint32_t spawnId;
+
 	checkSpawnEvent = 0;
-	for(SpawnedMap::iterator it = spawnedMap.begin(); it != spawnedMap.end(); )
+	for(SpawnedMap::iterator it = spawnedMap.begin(); it != spawnedMap.end();)
 	{
-		if(it->second->isRemoved())
+		spawnId = it->first;
+		monster = it->second;
+		if(monster->isRemoved())
 		{
-			if(it->first)
-				spawnMap[it->first].lastSpawn = OTSYS_TIME();
+			if(spawnId)
+				spawnMap[spawnId].lastSpawn = OTSYS_TIME();
 
-			if(it->second)
-				it->second->unRef();
-
+			monster->unRef();
 			spawnedMap.erase(it++);
 		}
 		else
-			++it;
+		{
+			/*if(spawnId && !isInSpawnZone(monster->getPosition()) && monster->getIdleStatus())
+				g_game.internalTeleport(monster, monster->getMasterPosition(), true);
+
+			*/++it;
+		}
 	}
 
 	uint32_t spawnCount = 0;
 	for(SpawnMap::iterator it = spawnMap.begin(); it != spawnMap.end(); ++it)
 	{
+		spawnId = it->first;
 		spawnBlock_t& sb = it->second;
-		if(spawnedMap.count(it->first))
+		if(spawnedMap.count(spawnId))
 			continue;
 
 		if(OTSYS_TIME() < sb.lastSpawn + sb.interval)
 			continue;
 
-		if(g_config.getBool(ConfigManager::ALLOW_BLOCK_SPAWN) && findPlayer(sb.pos))
+		if(findPlayer(sb.pos))
 		{
 			sb.lastSpawn = OTSYS_TIME();
 			continue;
 		}
 
-		spawnMonster(it->first, sb.mType, sb.pos, sb.direction);
-		uint32_t minSpawnCount = g_config.getNumber(ConfigManager::RATE_SPAWN_MIN),
-			maxSpawnCount = g_config.getNumber(ConfigManager::RATE_SPAWN_MAX);
-		if(++spawnCount >= (uint32_t)random_range(minSpawnCount, maxSpawnCount))
+		spawnMonster(spawnId, sb.mType, sb.pos, sb.direction);
+		++spawnCount;
+		if(spawnCount >= (uint32_t)g_config.getNumber(ConfigManager::RATE_SPAWN))
 			break;
 	}
 

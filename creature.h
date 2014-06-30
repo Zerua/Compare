@@ -69,14 +69,12 @@ enum Visible_t
 struct FindPathParams
 {
 	bool fullPathSearch, clearSight, allowDiagonal, keepDistance;
-	uint16_t maxClosedNodes;
 	int32_t maxSearchDist, minTargetDist, maxTargetDist;
 	FindPathParams()
 	{
 		fullPathSearch = clearSight = allowDiagonal = true;
-		keepDistance = false;
-		maxClosedNodes = 100;
 		maxSearchDist = minTargetDist = maxTargetDist = -1;
+		keepDistance = false;
 	}
 };
 
@@ -90,9 +88,11 @@ struct DeathEntry
 
 		bool isCreatureKill() const {return data.type() == typeid(Creature*);}
 		bool isNameKill() const {return !isCreatureKill();}
+#ifdef __WAR_SYSTEM__
 
 		void setWar(War_t v) {war = v;}
 		War_t getWar() const {return war;}
+#endif
 
 		void setLast() {last = true;}
 		bool isLast() const {return last;}
@@ -114,7 +114,9 @@ struct DeathEntry
 
 		boost::any data;
 		int32_t damage;
+#ifdef __WAR_SYSTEM__
 		War_t war;
+#endif
 
 		bool last;
 		bool justify;
@@ -143,11 +145,7 @@ class Item;
 class Container;
 
 #define EVENT_CREATURECOUNT 10
-#ifndef __GROUPED_ATTACKS__
-#define EVENT_CREATURE_THINK_INTERVAL 1000
-#else
 #define EVENT_CREATURE_THINK_INTERVAL 500
-#endif
 #define EVENT_CHECK_CREATURE_INTERVAL (EVENT_CREATURE_THINK_INTERVAL / EVENT_CREATURECOUNT)
 
 class FrozenPathingConditionCall
@@ -175,14 +173,13 @@ class Creature : public AutoId, virtual public Thing
 		virtual ~Creature();
 
 		virtual Creature* getCreature() {return this;}
-		virtual const Creature* getCreature() const {return this;}
+		virtual const Creature* getCreature()const {return this;}
 		virtual Player* getPlayer() {return NULL;}
 		virtual const Player* getPlayer() const {return NULL;}
 		virtual Npc* getNpc() {return NULL;}
 		virtual const Npc* getNpc() const {return NULL;}
 		virtual Monster* getMonster() {return NULL;}
 		virtual const Monster* getMonster() const {return NULL;}
-		virtual CreatureType_t getType() const = 0;
 
 		virtual const std::string& getName() const = 0;
 		virtual const std::string& getNameDescription() const = 0;
@@ -220,8 +217,8 @@ class Creature : public AutoId, virtual public Thing
 		bool getHideHealth() const {return hideHealth;}
 		void setHideHealth(bool v) {hideHealth = v;}
 
-		MessageClasses getSpeakType() const {return speakType;}
-		void setSpeakType(MessageClasses type) {speakType = type;}
+		SpeakClasses getSpeakType() const {return speakType;}
+		void setSpeakType(SpeakClasses type) {speakType = type;}
 
 		Position getMasterPosition() const {return masterPosition;}
 		void setMasterPosition(const Position& pos, uint32_t radius = 1) {masterPosition = pos; masterRadius = radius;}
@@ -275,10 +272,9 @@ class Creature : public AutoId, virtual public Thing
 
 		//walk functions
 		bool startAutoWalk(std::list<Direction>& listDir);
-		void stopWalk() {cancelNextWalk = true;}
 		void addEventWalk(bool firstStep = false);
 		void stopEventWalk();
-		virtual void goToFollowCreature();
+		void goToFollowCreature();
 
 		//walk events
 		virtual void onWalk(Direction& dir);
@@ -297,7 +293,7 @@ class Creature : public AutoId, virtual public Thing
 		Creature* getAttackedCreature() {return attackedCreature;}
 		virtual bool setAttackedCreature(Creature* creature);
 		virtual BlockType_t blockHit(Creature* attacker, CombatType_t combatType, int32_t& damage,
-			bool checkDefense = false, bool checkArmor = false, bool reflect = true, bool field = false, bool element = false);
+			bool checkDefense = false, bool checkArmor = false, bool reflect = true);
 
 		void setMaster(Creature* creature) {master = creature;}
 		Creature* getMaster() {return master;}
@@ -356,7 +352,7 @@ class Creature : public AutoId, virtual public Thing
 		virtual bool convinceCreature(Creature*) {return false;}
 
 		virtual bool onDeath();
-		virtual double getGainedExperience(Creature* attacker) const;
+		virtual double getGainedExperience(Creature* attacker) const {return getDamageRatio(attacker) * (double)getLostExperience();}
 		void addDamagePoints(Creature* attacker, int32_t damagePoints);
 		void addHealPoints(Creature* caster, int32_t healthPoints);
 		bool hasBeenAttacked(uint32_t attackerId) const;
@@ -367,26 +363,24 @@ class Creature : public AutoId, virtual public Thing
 		virtual void onEndCondition(ConditionType_t type);
 		virtual void onTickCondition(ConditionType_t type, int32_t interval, bool& _remove);
 		virtual void onCombatRemoveCondition(const Creature* attacker, Condition* condition);
-		virtual void onTarget(Creature*) {}
-		virtual void onSummonTarget(Creature*, Creature*) {}
+		virtual void onAttackedCreature(Creature*) {}
+		virtual void onSummonAttackedCreature(Creature*, Creature*) {}
 		virtual void onAttacked() {}
-		virtual void onTargetDrainHealth(Creature* target, int32_t points);
-		virtual void onSummonTargetDrainHealth(Creature*, Creature*, int32_t) {}
-		virtual void onTargetDrainMana(Creature* target, int32_t points);
-		virtual void onSummonTargetDrainMana(Creature*, Creature*, int32_t) {}
-		virtual void onTargetDrain(Creature* target, int32_t points);
-		virtual void onSummonTargetDrain(Creature*, Creature*, int32_t) {}
-		virtual void onTargetGainHealth(Creature* target, int32_t points);
-		virtual void onTargetGainMana(Creature* target, int32_t points);
-		virtual void onTargetGain(Creature* target, int32_t points);
-		virtual void onTargetKilled(Creature* target);
+		virtual void onAttackedCreatureDrainHealth(Creature* target, int32_t points);
+		virtual void onSummonAttackedCreatureDrainHealth(Creature*, Creature*, int32_t) {}
+		virtual void onAttackedCreatureDrainMana(Creature* target, int32_t points);
+		virtual void onSummonAttackedCreatureDrainMana(Creature*, Creature*, int32_t) {}
+		virtual void onAttackedCreatureDrain(Creature* target, int32_t points);
+		virtual void onSummonAttackedCreatureDrain(Creature*, Creature*, int32_t) {}
+		virtual void onTargetCreatureGainHealth(Creature* target, int32_t points);
+		virtual void onAttackedCreatureKilled(Creature* target);
 		virtual bool onKilledCreature(Creature* target, DeathEntry& entry);
-		virtual void onGainExperience(double& gainExp, Creature* target, bool multiplied);
-		virtual void onGainSharedExperience(double& gainExp, Creature* target, bool multiplied);
-		virtual void onTargetBlockHit(Creature*, BlockType_t) {}
+		virtual void onGainExperience(double& gainExp, bool fromMonster, bool multiplied);
+		virtual void onGainSharedExperience(double& gainExp, bool fromMonster, bool multiplied);
+		virtual void onAttackedCreatureBlockHit(Creature*, BlockType_t) {}
 		virtual void onBlockHit(BlockType_t) {}
 		virtual void onChangeZone(ZoneType_t zone);
-		virtual void onTargetChangeZone(ZoneType_t zone);
+		virtual void onAttackedCreatureChangeZone(ZoneType_t zone);
 		virtual void onIdleStatus();
 
 		virtual void getCreatureLight(LightInfo& light) const;
@@ -409,11 +403,11 @@ class Creature : public AutoId, virtual public Thing
 		virtual void onCreatureMove(const Creature* creature, const Tile* newTile, const Position& newPos,
 			const Tile* oldTile, const Position& oldPos, bool teleport);
 
-		virtual void onTargetDisappear(bool) {}
+		virtual void onAttackedCreatureDisappear(bool) {}
 		virtual void onFollowCreatureDisappear(bool) {}
 
 		virtual void onCreatureTurn(const Creature*) {}
-		virtual void onCreatureSay(const Creature*, MessageClasses, const std::string&,
+		virtual void onCreatureSay(const Creature*, SpeakClasses, const std::string&,
 			Position* = NULL) {}
 
 		virtual void onCreatureChangeOutfit(const Creature*, const Outfit_t&) {}
@@ -437,9 +431,8 @@ class Creature : public AutoId, virtual public Thing
 		virtual GuildEmblems_t getEmblem() const {return guildEmblem;}
 		virtual GuildEmblems_t getGuildEmblem(const Creature* creature) const {return creature->getEmblem();}
 
-		virtual void setDropLoot(lootDrop_t _lootDrop) {lootDrop = _lootDrop;}
-		virtual void setLossSkill(bool _skillLoss) {skillLoss = _skillLoss;}
-
+		void setDropLoot(lootDrop_t _lootDrop) {lootDrop = _lootDrop;}
+		void setLossSkill(bool _skillLoss) {skillLoss = _skillLoss;}
 		bool getLossSkill() const {return skillLoss;}
 		void setNoMove(bool _cannotMove)
 		{
@@ -451,7 +444,6 @@ class Creature : public AutoId, virtual public Thing
 		//creature script events
 		bool registerCreatureEvent(const std::string& name);
 		bool unregisterCreatureEvent(const std::string& name);
-		void unregisterCreatureEvent(CreatureEventType_t type);
 		CreatureEventList getCreatureEvents(CreatureEventType_t type);
 
 		virtual void setParent(Cylinder* cylinder)
@@ -487,10 +479,9 @@ class Creature : public AutoId, virtual public Thing
 		int32_t checkVector;
 		int32_t health, healthMax;
 		int32_t mana, manaMax;
-		int64_t lastFailedFollow;
 
 		bool hideName, hideHealth, cannotMove;
-		MessageClasses speakType;
+		SpeakClasses speakType;
 
 		Outfit_t currentOutfit;
 		Outfit_t defaultOutfit;
@@ -529,15 +520,15 @@ class Creature : public AutoId, virtual public Thing
 		struct CountBlock_t
 		{
 			uint32_t total;
-			int64_t start, ticks;
+			int64_t ticks, start;
 
 			CountBlock_t(uint32_t points)
 			{
-				total = points;
 				start = ticks = OTSYS_TIME();
+				total = points;
 			}
 
-			CountBlock_t() {total = start = ticks = 0;}
+			CountBlock_t() {start = ticks = total = 0;}
 		};
 
 		typedef std::map<uint32_t, CountBlock_t> CountMap;

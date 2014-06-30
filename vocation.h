@@ -15,12 +15,11 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ////////////////////////////////////////////////////////////////////////
 
-#ifndef __VOCATION__
-#define __VOCATION__
+#ifndef __OTSERV_VOCATION__
+#define __OTSERV_VOCATION__
 
 #include "otsystem.h"
 #include "enums.h"
-#include "const.h"
 
 enum multiplier_t
 {
@@ -59,16 +58,13 @@ class Vocation
 		uint32_t getId() const {return id;}
 		void setId(int32_t v) {id = v;}
 
-		uint16_t getClientId() const {return clientId;}
-		void setClientId(uint16_t v) {clientId = v;}
-
 		uint32_t getFromVocation() const {return fromVocation;}
 		void setFromVocation(int32_t v) {fromVocation = v;}
 
-		std::string getName() const {return name;}
+		const std::string& getName() const {return name;}
 		void setName(const std::string& v) {name = v;}
 
-		std::string getDescription() const {return description;}
+		const std::string& getDescription() const {return description;}
 		void setDescription(const std::string& v) {description = v;}
 
 		bool isAttackable() const {return attackable;}
@@ -76,12 +72,6 @@ class Vocation
 
 		bool isPremiumNeeded() const {return needPremium;}
 		void setNeedPremium(bool v) {needPremium = v;}
-
-		bool getDropLoot() const {return dropLoot;}
-		void setDropLoot(bool v) {dropLoot = v;}
-
-		bool getLossSkill() const {return skillLoss;}
-		void setLossSkill(bool v) {skillLoss = v;}
 
 		uint32_t getAttackSpeed() const {return attackSpeed;}
 		void setAttackSpeed(uint32_t v) {attackSpeed = v;}
@@ -125,8 +115,7 @@ class Vocation
 		cacheMap cacheSkill[SKILL_LAST + 1];
 		cacheMap cacheMana;
 
-		bool attackable, needPremium, dropLoot, skillLoss;
-		uint16_t clientId;
+		bool attackable, needPremium;
 		int32_t lessLoss, capGain;
 		uint32_t id, fromVocation, baseSpeed, attackSpeed;
 		std::string name, description;

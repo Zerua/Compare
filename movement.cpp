@@ -55,7 +55,7 @@ int32_t MoveEventScript::luaCallFunction(lua_State* L)
 	if(event->getEventType() == MOVE_EVENT_EQUIP || event->getEventType() == MOVE_EVENT_DE_EQUIP)
 	{
 		ScriptEnviroment* env = getEnv();
-		bool boolean = popBoolean(L);
+		bool boolean = popNumber(L);
 		slots_t slot = (slots_t)popNumber(L);
 
 		Item* item = env->getItemByUID(popNumber(L));
@@ -318,7 +318,7 @@ bool MoveEvents::registerEvent(Event* event, xmlNodePtr p, bool override)
 			std::clog << "[Warning - MoveEvents::registerEvent] Malformed entry (from unique: \"" << strValue << "\", to unique: \"" << endStrValue << "\")" << std::endl;
 	}
 
-	if(readXMLString(p, "actionid", strValue) || readXMLString(p, "aid", strValue))
+	if(readXMLString(p, "actionid", strValue))
 	{
 		strVector = explodeString(strValue, ";");
 		for(StringVec::iterator it = strVector.begin(); it != strVector.end(); ++it)
@@ -533,9 +533,7 @@ MoveEvent* MoveEvents::getEvent(const Tile* tile, MoveEvent_t eventType)
 
 bool MoveEvents::hasEquipEvent(Item* item)
 {
-	MoveEvent* event = NULL;
-	return (event = getEvent(item, MOVE_EVENT_EQUIP)) && !event->isScripted()
-		&& (event = getEvent(item, MOVE_EVENT_DE_EQUIP)) && !event->isScripted();
+	return getEvent(item, MOVE_EVENT_EQUIP) && getEvent(item, MOVE_EVENT_DE_EQUIP);
 }
 
 bool MoveEvents::hasTileEvent(Item* item)
@@ -567,9 +565,6 @@ uint32_t MoveEvents::onCreatureMove(Creature* actor, Creature* creature, const T
 	if((moveEvent = getEvent(tile, eventType)))
 		ret &= moveEvent->fireStepEvent(actor, creature, NULL, Position(), fromPos, toPos);
 
-	if(!tile)
-		return ret;
-
 	Item* tileItem = NULL;
 	if(m_lastCacheTile == tile)
 	{
@@ -591,7 +586,7 @@ uint32_t MoveEvents::onCreatureMove(Creature* actor, Creature* creature, const T
 
 	//We cannot use iterators here since the scripts can invalidate the iterator
 	Thing* thing = NULL;
-	for(int32_t i = tile->__getFirstIndex(), j = tile->__getLastIndex(); i < j; ++i) //already checked the ground
+	for(int32_t i = tile->__getFirstIndex(); i < tile->__getLastIndex(); ++i) //already checked the ground
 	{
 		if(!(thing = tile->__getThing(i)) || !(tileItem = thing->getItem()))
 			continue;
@@ -642,9 +637,6 @@ uint32_t MoveEvents::onItemMove(Creature* actor, Item* item, Tile* tile, bool is
 	if(moveEvent)
 		ret &= moveEvent->fireAddRemItem(actor, item, NULL, tile->getPosition());
 
-	if(!tile)
-		return ret;
-
 	Item* tileItem = NULL;
 	if(m_lastCacheTile == tile)
 	{
@@ -667,7 +659,7 @@ uint32_t MoveEvents::onItemMove(Creature* actor, Item* item, Tile* tile, bool is
 
 	//we cannot use iterators here since the scripts can invalidate the iterator
 	Thing* thing = NULL;
-	for(int32_t i = tile->__getFirstIndex(), j = tile->__getLastIndex(); i < j; ++i) //already checked the ground
+	for(int32_t i = tile->__getFirstIndex(); i < tile->__getLastIndex(); ++i) //already checked the ground
 	{
 		if(!(thing = tile->__getThing(i)) || !(tileItem = thing->getItem()) || tileItem == item)
 			continue;
@@ -712,12 +704,11 @@ void MoveEvents::onRemoveTileItem(const Tile* tile, Item* item)
 MoveEvent::MoveEvent(LuaInterface* _interface):
 Event(_interface)
 {
+	m_eventType = MOVE_EVENT_NONE;
 	stepFunction = NULL;
 	moveFunction = NULL;
 	equipFunction = NULL;
 	slot = SLOTP_WHEREEVER;
-
-	m_eventType = MOVE_EVENT_NONE;
 	wieldInfo = 0;
 	reqLevel = 0;
 	reqMagLevel = 0;
@@ -727,12 +718,11 @@ Event(_interface)
 MoveEvent::MoveEvent(const MoveEvent* copy):
 Event(copy)
 {
+	m_eventType = copy->m_eventType;
 	stepFunction = copy->stepFunction;
 	moveFunction = copy->moveFunction;
 	equipFunction = copy->equipFunction;
 	slot = copy->slot;
-
-	m_eventType = copy->m_eventType;
 	if(copy->m_eventType == MOVE_EVENT_EQUIP)
 	{
 		wieldInfo = copy->wieldInfo;
@@ -742,6 +732,11 @@ Event(copy)
 		premium = copy->premium;
 		vocEquipMap = copy->vocEquipMap;
 	}
+}
+
+MoveEvent::~MoveEvent()
+{
+	//
 }
 
 std::string MoveEvent::getScriptEventName() const
@@ -819,11 +814,7 @@ bool MoveEvent::configureEvent(xmlNodePtr p)
 			m_eventType = MOVE_EVENT_REMOVE_ITEM;
 		else
 		{
-			if(tmpStrValue == "function" || tmpStrValue == "buffer" || tmpStrValue == "script")
-				std::clog << "[Error - MoveEvent::configureMoveEvent] No event type found." << std::endl;
-			else
-				std::clog << "[Error - MoveEvent::configureMoveEvent] Unknown event type \"" << strValue << "\"" << std::endl;
-
+			std::clog << "[Error - MoveEvent::configureMoveEvent] Unknown event type \"" << strValue << "\"" << std::endl;
 			return false;
 		}
 
@@ -888,10 +879,13 @@ bool MoveEvent::configureEvent(xmlNodePtr p)
 
 			StringVec vocStringVec;
 			std::string error = "";
-			for(xmlNodePtr vocationNode = p->children; vocationNode; vocationNode = vocationNode->next)
+			xmlNodePtr vocationNode = p->children;
+			while(vocationNode)
 			{
 				if(!parseVocationNode(vocationNode, vocEquipMap, vocStringVec, error))
 					std::clog << "[Warning - MoveEvent::configureEvent] " << error << std::endl;
+
+				vocationNode = vocationNode->next;
 			}
 
 			if(!vocEquipMap.empty())
@@ -902,7 +896,7 @@ bool MoveEvent::configureEvent(xmlNodePtr p)
 	}
 	else
 	{
-		std::clog << "[Error - MoveEvent::configureMoveEvent] No event type found." << std::endl;
+		std::clog << "[Error - MoveEvent::configureMoveEvent] No event found." << std::endl;
 		return false;
 	}
 
@@ -947,7 +941,7 @@ uint32_t MoveEvent::StepInField(Creature* creature, Item* item)
 {
 	if(MagicField* field = item->getMagicField())
 	{
-		field->onStepInField(creature, creature->getPlayer() != NULL);
+		field->onStepInField(creature, creature->getPlayer());
 		return 1;
 	}
 
@@ -1001,44 +995,41 @@ bool MoveEvent::EquipItem(MoveEvent* moveEvent, Player* player, Item* item, slot
 	}
 
 	player->setItemAbility(slot, true);
-	if(!it.hasAbilities())
-		return true;
-
-	if(it.abilities->invisible)
+	if(it.abilities.invisible)
 	{
 		Condition* condition = Condition::createCondition((ConditionId_t)slot, CONDITION_INVISIBLE, -1, 0);
 		player->addCondition(condition);
 	}
 
-	if(it.abilities->manaShield)
+	if(it.abilities.manaShield)
 	{
 		Condition* condition = Condition::createCondition((ConditionId_t)slot, CONDITION_MANASHIELD, -1, 0);
 		player->addCondition(condition);
 	}
 
-	if(it.abilities->speed)
-		g_game.changeSpeed(player, it.abilities->speed);
+	if(it.abilities.speed)
+		g_game.changeSpeed(player, it.abilities.speed);
 
-	if(it.abilities->conditionSuppressions)
+	if(it.abilities.conditionSuppressions)
 	{
-		player->setConditionSuppressions(it.abilities->conditionSuppressions, false);
+		player->setConditionSuppressions(it.abilities.conditionSuppressions, false);
 		player->sendIcons();
 	}
 
-	if(it.abilities->regeneration)
+	if(it.abilities.regeneration)
 	{
 		Condition* condition = Condition::createCondition((ConditionId_t)slot, CONDITION_REGENERATION, -1, 0);
-		if(it.abilities->healthGain)
-			condition->setParam(CONDITIONPARAM_HEALTHGAIN, it.abilities->healthGain);
+		if(it.abilities.healthGain)
+			condition->setParam(CONDITIONPARAM_HEALTHGAIN, it.abilities.healthGain);
 
-		if(it.abilities->healthTicks)
-			condition->setParam(CONDITIONPARAM_HEALTHTICKS, it.abilities->healthTicks);
+		if(it.abilities.healthTicks)
+			condition->setParam(CONDITIONPARAM_HEALTHTICKS, it.abilities.healthTicks);
 
-		if(it.abilities->manaGain)
-			condition->setParam(CONDITIONPARAM_MANAGAIN, it.abilities->manaGain);
+		if(it.abilities.manaGain)
+			condition->setParam(CONDITIONPARAM_MANAGAIN, it.abilities.manaGain);
 
-		if(it.abilities->manaTicks)
-			condition->setParam(CONDITIONPARAM_MANATICKS, it.abilities->manaTicks);
+		if(it.abilities.manaTicks)
+			condition->setParam(CONDITIONPARAM_MANATICKS, it.abilities.manaTicks);
 
 		player->addCondition(condition);
 	}
@@ -1046,16 +1037,16 @@ bool MoveEvent::EquipItem(MoveEvent* moveEvent, Player* player, Item* item, slot
 	bool needUpdateSkills = false;
 	for(uint32_t i = SKILL_FIRST; i <= SKILL_LAST; ++i)
 	{
-		if(it.abilities->skills[i])
+		if(it.abilities.skills[i])
 		{
-			player->setVarSkill((skills_t)i, it.abilities->skills[i]);
+			player->setVarSkill((skills_t)i, it.abilities.skills[i]);
 			if(!needUpdateSkills)
 				needUpdateSkills = true;
 		}
 
-		if(it.abilities->skillsPercent[i])
+		if(it.abilities.skillsPercent[i])
 		{
-			player->setVarSkill((skills_t)i, (int32_t)(player->getSkill((skills_t)i, SKILL_LEVEL) * ((it.abilities->skillsPercent[i] - 100) / 100.f)));
+			player->setVarSkill((skills_t)i, (int32_t)(player->getSkill((skills_t)i, SKILL_LEVEL) * ((it.abilities.skillsPercent[i] - 100) / 100.f)));
 			if(!needUpdateSkills)
 				needUpdateSkills = true;
 		}
@@ -1067,16 +1058,16 @@ bool MoveEvent::EquipItem(MoveEvent* moveEvent, Player* player, Item* item, slot
 	bool needUpdateStats = false;
 	for(uint32_t s = STAT_FIRST; s <= STAT_LAST; ++s)
 	{
-		if(it.abilities->stats[s])
+		if(it.abilities.stats[s])
 		{
-			player->setVarStats((stats_t)s, it.abilities->stats[s]);
+			player->setVarStats((stats_t)s, it.abilities.stats[s]);
 			if(!needUpdateStats)
 				needUpdateStats = true;
 		}
 
-		if(it.abilities->statsPercent[s])
+		if(it.abilities.statsPercent[s])
 		{
-			player->setVarStats((stats_t)s, (int32_t)(player->getDefaultStats((stats_t)s) * ((it.abilities->statsPercent[s] - 100) / 100.f)));
+			player->setVarStats((stats_t)s, (int32_t)(player->getDefaultStats((stats_t)s) * ((it.abilities.statsPercent[s] - 100) / 100.f)));
 			if(!needUpdateStats)
 				needUpdateStats = true;
 		}
@@ -1101,40 +1092,37 @@ bool MoveEvent::DeEquipItem(MoveEvent*, Player* player, Item* item, slots_t slot
 	}
 
 	player->setItemAbility(slot, false);
-	if(!it.hasAbilities())
-		return true;
-
-	if(it.abilities->invisible)
+	if(it.abilities.invisible)
 		player->removeCondition(CONDITION_INVISIBLE, (ConditionId_t)slot);
 
-	if(it.abilities->manaShield)
+	if(it.abilities.manaShield)
 		player->removeCondition(CONDITION_MANASHIELD, (ConditionId_t)slot);
 
-	if(it.abilities->speed)
-		g_game.changeSpeed(player, -it.abilities->speed);
+	if(it.abilities.speed)
+		g_game.changeSpeed(player, -it.abilities.speed);
 
-	if(it.abilities->conditionSuppressions)
+	if(it.abilities.conditionSuppressions)
 	{
-		player->setConditionSuppressions(it.abilities->conditionSuppressions, true);
+		player->setConditionSuppressions(it.abilities.conditionSuppressions, true);
 		player->sendIcons();
 	}
 
-	if(it.abilities->regeneration)
+	if(it.abilities.regeneration)
 		player->removeCondition(CONDITION_REGENERATION, (ConditionId_t)slot);
 
 	bool needUpdateSkills = false;
 	for(uint32_t i = SKILL_FIRST; i <= SKILL_LAST; ++i)
 	{
-		if(it.abilities->skills[i])
+		if(it.abilities.skills[i])
 		{
 			needUpdateSkills = true;
-			player->setVarSkill((skills_t)i, -it.abilities->skills[i]);
+			player->setVarSkill((skills_t)i, -it.abilities.skills[i]);
 		}
 
-		if(it.abilities->skillsPercent[i])
+		if(it.abilities.skillsPercent[i])
 		{
 			needUpdateSkills = true;
-			player->setVarSkill((skills_t)i, -(int32_t)(player->getSkill((skills_t)i, SKILL_LEVEL) * ((it.abilities->skillsPercent[i] - 100) / 100.f)));
+			player->setVarSkill((skills_t)i, -(int32_t)(player->getSkill((skills_t)i, SKILL_LEVEL) * ((it.abilities.skillsPercent[i] - 100) / 100.f)));
 		}
 	}
 
@@ -1144,16 +1132,16 @@ bool MoveEvent::DeEquipItem(MoveEvent*, Player* player, Item* item, slots_t slot
 	bool needUpdateStats = false;
 	for(uint32_t s = STAT_FIRST; s <= STAT_LAST; ++s)
 	{
-		if(it.abilities->stats[s])
+		if(it.abilities.stats[s])
 		{
 			needUpdateStats = true;
-			player->setVarStats((stats_t)s, -it.abilities->stats[s]);
+			player->setVarStats((stats_t)s, -it.abilities.stats[s]);
 		}
 
-		if(it.abilities->statsPercent[s])
+		if(it.abilities.statsPercent[s])
 		{
 			needUpdateStats = true;
-			player->setVarStats((stats_t)s, -(int32_t)(player->getDefaultStats((stats_t)s) * ((it.abilities->statsPercent[s] - 100) / 100.f)));
+			player->setVarStats((stats_t)s, -(int32_t)(player->getDefaultStats((stats_t)s) * ((it.abilities.statsPercent[s] - 100) / 100.f)));
 		}
 	}
 
@@ -1192,9 +1180,7 @@ uint32_t MoveEvent::executeStep(Creature* actor, Creature* creature, Item* item,
 			env->streamPosition(scriptstream, "toPosition", toPos, 0);
 			scriptstream << "local actor = " << env->addThing(actor) << std::endl;
 
-			if(m_scriptData)
-				scriptstream << *m_scriptData;
-
+			scriptstream << m_scriptData;
 			bool result = true;
 			if(m_interface->loadBuffer(scriptstream.str()))
 			{
@@ -1266,9 +1252,7 @@ bool MoveEvent::executeEquip(Player* player, Item* item, slots_t slot, bool bool
 			scriptstream << "local slot = " << slot << std::endl;
 			scriptstream << "local boolean = " << (boolean ? "true" : "false") << std::endl;
 
-			if(m_scriptData)
-				scriptstream << *m_scriptData;
-
+			scriptstream << m_scriptData;
 			bool result = true;
 			if(m_interface->loadBuffer(scriptstream.str()))
 			{
@@ -1337,9 +1321,7 @@ uint32_t MoveEvent::executeAddRemItem(Creature* actor, Item* item, Item* tileIte
 			env->streamPosition(scriptstream, "position", pos, 0);
 			scriptstream << "local cid = " << env->addThing(actor) << std::endl;
 
-			if(m_scriptData)
-				scriptstream << *m_scriptData;
-
+			scriptstream << m_scriptData;
 			bool result = true;
 			if(m_interface->loadBuffer(scriptstream.str()))
 			{

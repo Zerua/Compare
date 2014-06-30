@@ -26,59 +26,61 @@ Scheduler::Scheduler()
 {
 	m_lastEvent = 0;
 	Scheduler::m_threadState = STATE_RUNNING;
-	m_thread = boost::thread(boost::bind(&Scheduler::schedulerThread, this));
+	boost::thread(boost::bind(&Scheduler::schedulerThread, (void*)this));
 }
 
-void Scheduler::schedulerThread()
+void Scheduler::schedulerThread(void* p)
 {
+	Scheduler* scheduler = (Scheduler*)p;
 	#if defined __EXCEPTION_TRACER__
 	ExceptionHandler schedulerExceptionHandler;
 	schedulerExceptionHandler.InstallHandler();
 	#endif
+	srand((uint32_t)OTSYS_TIME());
 
-	boost::unique_lock<boost::mutex> eventLockUnique(m_eventLock, boost::defer_lock);
+	boost::unique_lock<boost::mutex> eventLockUnique(scheduler->m_eventLock, boost::defer_lock);
 	while(Scheduler::m_threadState != Scheduler::STATE_TERMINATED)
 	{
 		SchedulerTask* task = NULL;
-		bool run = false, action = false;
+		bool run = false, ret = false;
 
 		// check if there are events waiting...
 		eventLockUnique.lock();
-		if(m_eventList.empty()) // unlock mutex and wait for signal
-			m_eventSignal.wait(eventLockUnique);
+		if(scheduler->m_eventList.empty()) // unlock mutex and wait for signal
+			scheduler->m_eventSignal.wait(eventLockUnique);
 		else // unlock mutex and wait for signal or timeout
-			action = m_eventSignal.timed_wait(eventLockUnique, m_eventList.top()->getCycle());
+			ret = scheduler->m_eventSignal.timed_wait(eventLockUnique, scheduler->m_eventList.top()->getCycle());
 
 		// the mutex is locked again now...
-		if(!action && Scheduler::m_threadState != Scheduler::STATE_TERMINATED)
+		if(!ret && Scheduler::m_threadState != Scheduler::STATE_TERMINATED)
 		{
 			// ok we had a timeout, so there has to be an event we have to execute...
-			task = m_eventList.top();
-			m_eventList.pop();
+			task = scheduler->m_eventList.top();
+			scheduler->m_eventList.pop();
 
 			// check if the event was stopped
-			EventIds::iterator it = m_eventIds.find(task->getEventId());
-			if(it != m_eventIds.end())
+			EventIds::iterator it = scheduler->m_eventIds.find(task->getEventId());
+			if(it != scheduler->m_eventIds.end())
 			{
 				// was not stopped so we should run it
 				run = true;
-				m_eventIds.erase(it);
+				scheduler->m_eventIds.erase(it);
 			}
 		}
 
 		eventLockUnique.unlock();
 		// add task to dispatcher
-		if(!task)
-			continue;
-
-		// if it was not stopped
-		if(run)
+		if(task)
 		{
-			task->unsetExpiration();
-			Dispatcher::getInstance().addTask(task);
+			// if it was not stopped
+			if(run)
+			{
+				task->unsetExpiration();
+				Dispatcher::getInstance().addTask(task);
+			}
+			else
+				delete task; // was stopped, have to be deleted here
 		}
-		else
-			delete task; // was stopped, have to be deleted here
 	}
 
 	#if defined __EXCEPTION_TRACER__

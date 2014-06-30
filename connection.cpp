@@ -127,7 +127,7 @@ void ConnectionManager::addAttempt(uint32_t clientIp, int32_t protocolId, bool s
 
 		ipLoginMap[clientIp] = tmp;
 		it = ipLoginMap.find(clientIp);
-	}
+        }
 
 	if(it->second.loginsAmount > g_config.getNumber(ConfigManager::LOGIN_TRIES))
 		it->second.loginsAmount = 0;
@@ -160,7 +160,7 @@ bool ConnectionManager::acceptConnection(uint32_t clientIp)
 
 		ipConnectMap[clientIp] = tmp;
 		return true;
-	}
+        }
 
 	it->second.count++;
 	if(it->second.blockTime > currentTime)
@@ -487,7 +487,7 @@ bool Connection::send(OutputMessage_ptr msg)
 		close();
 	}
 	else
-	{
+	{	
 		#ifdef __DEBUG_NET__
 		std::clog << "Connection::send Adding to queue " << msg->size() << std::endl;
 		#endif
@@ -531,18 +531,6 @@ uint32_t Connection::getIP() const
 		return htonl(ip.address().to_v4().to_ulong());
 
 	PRINT_ASIO_ERROR("Getting remote ip");
-	return 0;
-}
-
-uint32_t Connection::getEndpoint() const
-{
-	//ip is expressed in network byte order
-	boost::system::error_code error;
-	const boost::asio::ip::tcp::endpoint ip = m_socket->local_endpoint(error);
-	if(!error)
-		return htonl(ip.address().to_v4().to_ulong());
-
-	PRINT_ASIO_ERROR("Getting local ip");
 	return 0;
 }
 
@@ -667,4 +655,3 @@ void Connection::handleWriteTimeout(boost::weak_ptr<Connection> weak, const boos
 		connection->onWriteTimeout();
 	}
 }
-

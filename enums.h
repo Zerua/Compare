@@ -21,30 +21,6 @@
 #include <string>
 #include <list>
 
-#define PLAYER_ID_RANGE 0x10000000
-#define MONSTER_ID_RANGE 0x40000000
-#define NPC_ID_RANGE 0x80000000
-
-enum Vocation_t
-{
-	VOCATION_NONE = 0,
-	VOCATION_SORCERER = 1,
-	VOCATION_DRUID = 2,
-	VOCATION_PALADIN = 3,
-	VOCATION_KNIGHT = 4,
-	VOCATION_MASTERSORCERER = 5,
-	VOCATION_ELDERDRUID = 6,
-	VOCATION_ROYALPALADIN = 7,
-	VOCATION_ELITEKNIGHT = 8
-};
-
-enum CreatureType_t
-{
-	CREATURETYPE_PLAYER = 0,
-	CREATURETYPE_MONSTER = 1,
-	CREATURETYPE_NPC = 2
-};
-
 enum DatabaseEngine_t
 {
 	DATABASE_ENGINE_NONE = 0,
@@ -59,7 +35,8 @@ enum Encryption_t
 	ENCRYPTION_MD5,
 	ENCRYPTION_SHA1,
 	ENCRYPTION_SHA256,
-	ENCRYPTION_SHA512
+	ENCRYPTION_SHA512,
+	ENCRYPTION_VAHASH
 };
 
 enum GuildLevel_t
@@ -68,6 +45,12 @@ enum GuildLevel_t
 	GUILDLEVEL_MEMBER,
 	GUILDLEVEL_VICE,
 	GUILDLEVEL_LEADER
+};
+
+enum OperatingSystem_t
+{
+	CLIENTOS_LINUX = 0x01,
+	CLIENTOS_WINDOWS = 0x02
 };
 
 enum Channels_t
@@ -109,24 +92,21 @@ enum RaceType_t
 
 enum CombatType_t
 {
-	COMBAT_NONE				= 0x00,
-	COMBAT_ALL				= COMBAT_NONE, /* for internal use only.*/
-
+	COMBAT_FIRST		= 0,
+	COMBAT_NONE		= COMBAT_FIRST,
 	COMBAT_PHYSICALDAMAGE	= 1 << 0,
-	COMBAT_ENERGYDAMAGE		= 1 << 1,
-	COMBAT_EARTHDAMAGE		= 1 << 2,
-	COMBAT_FIREDAMAGE		= 1 << 3,
+	COMBAT_ENERGYDAMAGE	= 1 << 1,
+	COMBAT_EARTHDAMAGE	= 1 << 2,
+	COMBAT_FIREDAMAGE	= 1 << 3,
 	COMBAT_UNDEFINEDDAMAGE	= 1 << 4,
-	COMBAT_LIFEDRAIN		= 1 << 5,
-	COMBAT_MANADRAIN		= 1 << 6,
-	COMBAT_HEALING			= 1 << 7,
-	COMBAT_DROWNDAMAGE		= 1 << 8,
-	COMBAT_ICEDAMAGE		= 1 << 9,
-	COMBAT_HOLYDAMAGE		= 1 << 10,
-	COMBAT_DEATHDAMAGE		= 1 << 11,
-
-	COMBAT_FIRST			= COMBAT_NONE,
-	COMBAT_LAST				= COMBAT_DEATHDAMAGE
+	COMBAT_LIFEDRAIN	= 1 << 5,
+	COMBAT_MANADRAIN	= 1 << 6,
+	COMBAT_HEALING		= 1 << 7,
+	COMBAT_DROWNDAMAGE	= 1 << 8,
+	COMBAT_ICEDAMAGE	= 1 << 9,
+	COMBAT_HOLYDAMAGE	= 1 << 10,
+	COMBAT_DEATHDAMAGE	= 1 << 11,
+	COMBAT_LAST		= COMBAT_DEATHDAMAGE
 };
 
 enum CombatParam_t
@@ -145,9 +125,7 @@ enum CombatParam_t
 	COMBATPARAM_TARGETPLAYERSORSUMMONS,
 	COMBATPARAM_DIFFERENTAREADAMAGE,
 	COMBATPARAM_HITEFFECT,
-	COMBATPARAM_HITCOLOR,
-	COMBATPARAM_ELEMENTTYPE,
-	COMBATPARAM_ELEMENTDAMAGE
+	COMBATPARAM_HITCOLOR
 };
 
 enum CallBackParam_t
@@ -205,31 +183,7 @@ enum ConditionParam_t
 	CONDITIONPARAM_SKILL_FISHINGPERCENT,
 	CONDITIONPARAM_PERIODICDAMAGE,
 	CONDITIONPARAM_BUFF,
-	CONDITIONPARAM_SUBID,
-	CONDITIONPARAM_FIELD,
-	CONDITIONPARAM_COMBAT_PHYSICALDAMAGE,
-	CONDITIONPARAM_COMBAT_ENERGYDAMAGE,
-	CONDITIONPARAM_COMBAT_EARTHDAMAGE,
-	CONDITIONPARAM_COMBAT_FIREDAMAGE,
-	CONDITIONPARAM_COMBAT_UNDEFINEDDAMAGE,
-	CONDITIONPARAM_COMBAT_LIFEDRAIN,
-	CONDITIONPARAM_COMBAT_MANADRAIN,
-	CONDITIONPARAM_COMBAT_HEALING,
-	CONDITIONPARAM_COMBAT_DROWNDAMAGE,
-	CONDITIONPARAM_COMBAT_ICEDAMAGE,
-	CONDITIONPARAM_COMBAT_HOLYDAMAGE,
-	CONDITIONPARAM_COMBAT_DEATHDAMAGE
-};
-
-enum Exhaust_t
-{
-	EXHAUST_OTHER = 0,
-	EXHAUST_SPELLGROUP_NONE = 1,
-	EXHAUST_SPELLGROUP_ATTACK = 2,
-	EXHAUST_SPELLGROUP_HEALING = 3,
-	EXHAUST_SPELLGROUP_SUPPORT = 4,
-	EXHAUST_SPELLGROUP_SPECIAL = 5,
-	EXHAUST_MELEE = 6
+	CONDITIONPARAM_SUBID
 };
 
 enum BlockType_t
@@ -256,6 +210,22 @@ enum Increment_t
 	MAGIC_VALUE,
 	MAGIC_PERCENT,
 	INCREMENT_LAST = MAGIC_PERCENT
+};
+
+enum skills_t
+{
+	SKILL_FIRST = 0,
+	SKILL_FIST = SKILL_FIRST,
+	SKILL_CLUB,
+	SKILL_SWORD,
+	SKILL_AXE,
+	SKILL_DIST,
+	SKILL_SHIELD,
+	SKILL_FISH,
+	SKILL__MAGLEVEL,
+	SKILL__LEVEL,
+	SKILL_LAST = SKILL_FISH,
+	SKILL__LAST = SKILL__LEVEL
 };
 
 enum stats_t
@@ -312,6 +282,7 @@ enum PlayerSex_t
 	// DO NOT ADD HERE! Every higher sex is only for your
 	// own use- each female should be even and male odd.
 };
+#ifdef __WAR_SYSTEM__
 
 enum WarType_t
 {
@@ -331,8 +302,7 @@ struct War_t
 		memset(ids, 0, sizeof(ids));
 		memset(frags, 0, sizeof(frags));
 
-		limit = 0;
-		payment = 0;
+		limit = payment = 0;
 	}
 
 	uint32_t war;
@@ -345,21 +315,11 @@ struct War_t
 	uint16_t limit;
 	uint64_t payment;
 };
+#endif
 
 struct Outfit_t
 {
-	Outfit_t()
-	{
-		lookType = lookTypeEx = 0;
-		lookHead = lookBody = lookLegs = lookFeet = lookAddons = 0;
-	}
-	Outfit_t(uint16_t _lookType)
-	{
-		lookType = _lookType;
-		lookTypeEx = 0;
-		lookHead = lookBody = lookLegs = lookFeet = lookAddons = 0;
-	}
-
+	Outfit_t() {lookHead = lookBody = lookLegs = lookFeet = lookType = lookTypeEx = lookAddons = 0;}
 	uint16_t lookType, lookTypeEx;
 	uint8_t lookHead, lookBody, lookLegs, lookFeet, lookAddons;
 

@@ -57,9 +57,6 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 	if(readXMLString(p, "name", strValue))
 		voc->setName(strValue);
 
-	if(readXMLInteger(p, "clientId", intValue))
-		voc->setClientId(intValue);
-
 	if(readXMLString(p, "description", strValue))
 		voc->setDescription(strValue);
 
@@ -88,12 +85,7 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 		voc->setGainAmount(GAIN_MANA, intValue);
 
 	if(readXMLFloat(p, "manamultiplier", floatValue))
-	{
-		if(floatValue >= 1.0f)
-			voc->setMultiplier(MULTIPLIER_MANA, floatValue);
-		else
-			std::clog << "[Error - Vocations::parseVocationNode] Mana multiplier must be equal or greater than 1." << std::endl;
-	}
+		voc->setMultiplier(MULTIPLIER_MANA, floatValue);
 
 	if(readXMLInteger(p, "attackspeed", intValue))
 		voc->setAttackSpeed(intValue);
@@ -118,12 +110,6 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 
 	if(readXMLInteger(p, "lessloss", intValue))
 		voc->setLessLoss(intValue);
-
-	if(readXMLString(p, "droploot", strValue) || readXMLString(p, "lootdrop", strValue))
-		voc->setDropLoot(booleanString(strValue));
-
-	if(readXMLString(p, "skillloss", strValue) || readXMLString(p, "lossskill", strValue))
-		voc->setLossSkill(booleanString(strValue));
 
 	for(xmlNodePtr configNode = p->children; configNode; configNode = configNode->next)
 	{
@@ -177,7 +163,7 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 			if(readXMLInteger(configNode, "id", intValue))
 			{
 				skills_t skill = (skills_t)intValue;
-				if(skill < SKILL_FIRST || skill >= SKILL__LAST)
+				if(intValue < SKILL_FIRST || intValue >= SKILL__LAST)
 				{
 					std::clog << "[Error - Vocations::parseVocationNode] No valid skill id (" << intValue << ")." << std::endl;
 					continue;
@@ -220,7 +206,7 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 		{
 			if(readXMLInteger(configNode, "percentAll", intValue))
 			{
-				for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
+				for(int32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
 					voc->increaseAbsorb((CombatType_t)i, intValue);
 			}
 
@@ -282,7 +268,7 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 		{
 			if(readXMLInteger(configNode, "percentAll", intValue))
 			{
-				for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
+				for(int32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
 					voc->increaseReflect(REFLECT_PERCENT, (CombatType_t)i, intValue);
 			}
 
@@ -342,7 +328,7 @@ bool Vocations::parseVocationNode(xmlNodePtr p)
 
 			if(readXMLInteger(configNode, "chanceAll", intValue))
 			{
-				for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
+				for(int32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
 					voc->increaseReflect(REFLECT_CHANCE, (CombatType_t)i, intValue);
 			}
 
@@ -416,7 +402,7 @@ bool Vocations::loadFromXml()
 		return false;
 	}
 
-	xmlNodePtr root = xmlDocGetRootElement(doc);
+	xmlNodePtr p, root = xmlDocGetRootElement(doc);
 	if(xmlStrcmp(root->name,(const xmlChar*)"vocations"))
 	{
 		std::clog << "[Error - Vocations::loadFromXml] Malformed vocations file." << std::endl;
@@ -424,7 +410,7 @@ bool Vocations::loadFromXml()
 		return false;
 	}
 
-	for(xmlNodePtr p = root->children; p; p = p->next)
+	for(p = root->children; p; p = p->next)
 		parseVocationNode(p);
 
 	xmlFreeDoc(doc);
@@ -445,7 +431,7 @@ int32_t Vocations::getVocationId(const std::string& name)
 {
 	for(VocationsMap::iterator it = vocationsMap.begin(); it != vocationsMap.end(); ++it)
 	{
-		if(boost::algorithm::iequals(it->second->getName(), name))
+		if(!strcasecmp(it->second->getName().c_str(), name.c_str()))
 			return it->first;
 	}
 
@@ -477,9 +463,8 @@ void Vocation::reset()
 	memset(reflect[REFLECT_CHANCE], 0, sizeof(reflect[REFLECT_CHANCE]));
 
 	needPremium = false;
-	attackable = dropLoot = skillLoss = true;
+	attackable = true;
 	lessLoss = fromVocation = 0;
-	clientId = 0;
 	gain[GAIN_SOUL] = 100;
 	gainTicks[GAIN_SOUL] = 120;
 	baseSpeed = 220;
@@ -493,23 +478,23 @@ void Vocation::reset()
 	skillBase[SKILL_SHIELD] = 100;
 	skillBase[SKILL_DIST] = 30;
 	skillBase[SKILL_FISH] = 20;
-	for(int32_t i = SKILL_FIST; i < SKILL_DIST; ++i)
+	for(int32_t i = SKILL_FIST; i < SKILL_DIST; i++)
 		skillBase[i] = 50;
 
 	skillMultipliers[SKILL_FIST] = 1.5f;
 	skillMultipliers[SKILL_FISH] = 1.1f;
 	skillMultipliers[SKILL__LEVEL] = 1.0f;
-	for(int32_t i = SKILL_CLUB; i < SKILL_FISH; ++i)
+	for(int32_t i = SKILL_CLUB; i < SKILL_FISH; i++)
 		skillMultipliers[i] = 2.0f;
 
 	formulaMultipliers[MULTIPLIER_MANA] = 4.0f;
-	for(int32_t i = MULTIPLIER_FIRST; i < MULTIPLIER_LAST; ++i)
+	for(int32_t i = MULTIPLIER_FIRST; i < MULTIPLIER_LAST; i++)
 		formulaMultipliers[i] = 1.0f;
 }
 
 int16_t Vocation::getReflect(CombatType_t combat) const
 {
-	if(reflect[REFLECT_CHANCE][combat] >= random_range(1, 100))
+	if(reflect[REFLECT_CHANCE][combat] < random_range(0, 100))
 		return reflect[REFLECT_PERCENT][combat];
 
 	return 0;
@@ -522,7 +507,7 @@ uint64_t Vocation::getReqSkillTries(int32_t skill, int32_t level)
 
 	cacheMap& skillMap = cacheSkill[skill];
 	cacheMap::iterator it = skillMap.find(level);
-	if(it != skillMap.end())
+	if(it != cacheSkill[skill].end())
 		return it->second;
 
 	skillMap[level] = (uint64_t)(skillBase[skill] * std::pow(skillMultipliers[skill], (level - 11)));
@@ -531,9 +516,6 @@ uint64_t Vocation::getReqSkillTries(int32_t skill, int32_t level)
 
 uint64_t Vocation::getReqMana(uint32_t magLevel)
 {
-	if(!magLevel)
-		return 0;
-
 	cacheMap::iterator it = cacheMana.find(magLevel);
 	if(it != cacheMana.end())
 		return it->second;

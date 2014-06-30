@@ -71,9 +71,8 @@ class Scheduler
 
 		void stop();
 		void shutdown();
-		void exit() {m_thread.join();}
 
-		void schedulerThread();
+		static void schedulerThread(void* p);
 
 	protected:
 		Scheduler();
@@ -87,7 +86,6 @@ class Scheduler
 		uint32_t m_lastEvent;
 		EventIds m_eventIds;
 
-		boost::thread m_thread;
 		boost::mutex m_eventLock;
 		boost::condition_variable m_eventSignal;
 

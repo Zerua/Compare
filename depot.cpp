@@ -19,8 +19,11 @@
 #include "tools.h"
 
 Depot::Depot(uint16_t type):
-	Container(type), depotLimit(1000)
-{}
+	Container(type)
+{
+	maxSize = 30;
+	depotLimit = 1000;
+}
 
 Attr_ReadValue Depot::readAttr(AttrTypes_t attr, PropStream& propStream)
 {
@@ -36,11 +39,14 @@ Attr_ReadValue Depot::readAttr(AttrTypes_t attr, PropStream& propStream)
 }
 
 ReturnValue Depot::__queryAdd(int32_t index, const Thing* thing, uint32_t count,
-	uint32_t flags, Creature* actor/* = NULL*/) const
+	uint32_t flags) const
 {
 	const Item* item = thing->getItem();
 	if(!item)
 		return RET_NOTPOSSIBLE;
+
+	if((flags & FLAG_NOLIMIT) == FLAG_NOLIMIT)
+		return Container::__queryAdd(index, thing, count, flags);
 
 	int32_t addCount = 0;
 	if((item->isStackable() && item->getItemCount() != count))
@@ -57,7 +63,7 @@ ReturnValue Depot::__queryAdd(int32_t index, const Thing* thing, uint32_t count,
 	if(getItemHoldingCount() + addCount > depotLimit)
 		return RET_DEPOTISFULL;
 
-	return Container::__queryAdd(index, thing, count, flags, actor);
+	return Container::__queryAdd(index, thing, count, flags);
 }
 
 ReturnValue Depot::__queryMaxCount(int32_t index, const Thing* thing, uint32_t count,
@@ -67,15 +73,16 @@ ReturnValue Depot::__queryMaxCount(int32_t index, const Thing* thing, uint32_t c
 }
 
 void Depot::postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
-	int32_t index, CylinderLink_t /*link = LINK_OWNER*/)
+	int32_t index, cylinderlink_t /*link = LINK_OWNER*/)
 {
 	if(getParent())
 		getParent()->postAddNotification(actor, thing, oldParent, index, LINK_PARENT);
 }
 
 void Depot::postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
-	int32_t index, bool isCompleteRemoval, CylinderLink_t /*link = LINK_OWNER*/)
+	int32_t index, bool isCompleteRemoval, cylinderlink_t /*link = LINK_OWNER*/)
 {
 	if(getParent())
-		getParent()->postRemoveNotification(actor, thing, newParent, index, isCompleteRemoval, LINK_PARENT);
+		getParent()->postRemoveNotification(actor, thing, newParent,
+			index, isCompleteRemoval, LINK_PARENT);
 }

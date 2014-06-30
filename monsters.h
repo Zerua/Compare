@@ -46,8 +46,7 @@ struct LootBlock
 
 	LootBlock()
 	{
-		count = 1;
-		chance = 0;
+		count = chance = 0;
 		subType = actionId = uniqueId = -1;
 	}
 };
@@ -92,7 +91,7 @@ class MonsterType
 		bool createChildLoot(Container* parent, const LootBlock& lootBlock);
 
 		bool isSummonable, isIllusionable, isConvinceable, isAttackable, isHostile, isLureable,
-			isWalkable, canPushItems, canPushCreatures, pushable, hideName, hideHealth, eliminable;
+			isWalkable, canPushItems, canPushCreatures, pushable, hideName, hideHealth;
 
 		Outfit_t outfit;
 		RaceType_t race;
@@ -101,13 +100,13 @@ class MonsterType
 		GuildEmblems_t guildEmblem;
 		LootMessage_t lootMessage;
 
-		int32_t defense, armor, health, healthMin, healthMax, baseSpeed, lookCorpse, corpseUnique, corpseAction,
+		int32_t defense, armor, health, healthMax, baseSpeed, lookCorpse, corpseUnique, corpseAction,
 			maxSummons, targetDistance, runAwayHealth, conditionImmunities, damageImmunities,
 			lightLevel, lightColor, changeTargetSpeed, changeTargetChance;
 		uint32_t yellChance, yellSpeedTicks, staticAttackChance, manaCost;
 		uint64_t experience;
 
-		std::string name, nameDescription, file;
+		std::string name, nameDescription;
 
 		SummonList summonList;
 		LootItems lootItems;

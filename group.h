@@ -50,9 +50,9 @@ class Group
 		uint8_t getViolationReasons() const {return m_violationReasons;}
 		void setViolationReasons(uint8_t v) {m_violationReasons = v;}
 		int16_t getStatementViolationFlags() const {return m_statementViolationFlags;}
-		void setStatementViolationFlags(uint16_t v) {m_statementViolationFlags = v;}
+		void setStatementViolationFlags(uint8_t v) {m_statementViolationFlags = v;}
 		int16_t getNameViolationFlags() const {return m_nameViolationFlags;}
-		void setNameViolationFlags(uint16_t v) {m_nameViolationFlags = v;}
+		void setNameViolationFlags(uint8_t v) {m_nameViolationFlags = v;}
 		uint16_t getOutfit() const {return m_outfit;}
 		void setOutfit(uint16_t v) {m_outfit = v;}
 
@@ -68,8 +68,8 @@ class Group
 		uint64_t getCustomFlags() const {return m_customFlags;}
 		void setCustomFlags(uint64_t v) {m_customFlags = v;}
 
-		bool hasFlag(uint64_t value) const {return (m_flags & ((uint64_t)1 << value)) != 0;}
-		bool hasCustomFlag(uint64_t value) const {return (m_customFlags & ((uint64_t)1 << value)) != 0;}
+		bool hasFlag(uint64_t value) const {return (m_flags & ((uint64_t)1 << value));}
+		bool hasCustomFlag(uint64_t value) const {return (m_customFlags & ((uint64_t)1 << value));}
 
 	private:
 		std::string m_name, m_fullName;

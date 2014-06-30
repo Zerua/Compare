@@ -20,11 +20,12 @@
 #include "connection.h"
 #include "outputmessage.h"
 #include "textlogger.h"
-#include "scheduler.h"
 
+#include "game.h"
 #include "configmanager.h"
 #include "tools.h"
 
+extern Game g_game;
 extern ConfigManager g_config;
 
 bool ServicePort::m_logError = true;
@@ -78,10 +79,9 @@ void ServicePort::open(IPAddressList ips, uint16_t port)
 			Acceptor_ptr tmp(new boost::asio::ip::tcp::acceptor(m_io_service,
 				boost::asio::ip::tcp::endpoint(*it, m_serverPort)));
 			tmp->set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-			tmp->set_option(boost::asio::ip::tcp::no_delay(true));
 
 			accept(tmp);
-			m_acceptors[tmp] = *it;
+			m_acceptors.push_back(tmp);
 		}
 		catch(std::exception& e)
 		{
@@ -111,11 +111,11 @@ void ServicePort::close()
 
 	for(AcceptorVec::iterator it = m_acceptors.begin(); it != m_acceptors.end(); ++it)
 	{
-		if(it->first->is_open())
+		if(!(*it)->is_open())
 			continue;
 
 		boost::system::error_code error;
-		it->first->close(error);
+		(*it)->close(error);
 		if(error)
 		{
 			PRINT_ASIO_ERROR("Closing listen socket");
@@ -195,7 +195,7 @@ void ServicePort::handle(Acceptor_ptr acceptor, boost::asio::ip::tcp::socket* so
 			m_pendingStart = true;
 			Scheduler::getInstance().addEvent(createSchedulerTask(5000, boost::bind(
 				&ServicePort::service, boost::weak_ptr<ServicePort>(shared_from_this()),
-				m_acceptors[acceptor], m_serverPort)));
+				acceptor->local_endpoint().address().to_v4(), m_serverPort)));
 		}
 	}
 #ifdef __DEBUG_NET__
@@ -236,17 +236,8 @@ void ServiceManager::run()
 	assert(!running);
 	try
 	{
-		std::vector<boost::shared_ptr<boost::thread> > threads;
-		for(uint32_t i = 0; i < g_config.getNumber(ConfigManager::SERVICE_THREADS); ++i)
-		{
-			boost::shared_ptr<boost::thread> thread(new boost::thread(
-				boost::bind(&boost::asio::io_service::run, &m_io_service)));
-			threads.push_back(thread);
-		}
-
+		m_io_service.run();
 		running = true;
-		for(std::vector<boost::shared_ptr<boost::thread> >::const_iterator it = threads.begin(); it != threads.end(); ++it)
-			(*it)->join();
 	}
 	catch(std::exception& e)
 	{
@@ -275,7 +266,7 @@ void ServiceManager::stop()
 	m_acceptors.clear();
 	OutputMessagePool::getInstance()->stop();
 
-	deathTimer.expires_from_now(boost::posix_time::seconds(3));
+	deathTimer.expires_from_now(boost::posix_time::seconds(3)); 
 	deathTimer.async_wait(boost::bind(&ServiceManager::die, this));
 }
 

@@ -30,7 +30,6 @@
 #include "weapons.h"
 
 #include "monsters.h"
-#include "npc.h"
 #include "spawn.h"
 #include "raids.h"
 #include "group.h"
@@ -54,7 +53,6 @@ GlobalEvents* g_globalEvents = NULL;
 extern Chat g_chat;
 extern ConfigManager g_config;
 extern Monsters g_monsters;
-extern Npcs g_npcs;
 
 ScriptManager::ScriptManager():
 modsLoaded(false)
@@ -70,63 +68,49 @@ modsLoaded(false)
 
 bool ScriptManager::loadSystem()
 {
-	std::clog << "> Loading weapons... ";
 	if(!g_weapons->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load Weapons!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Preparing weapons... ";
-	if(!g_weapons->loadDefaults())
-	{
-		std::clog << "failed!" << std::endl;
-		return false;
-	}
-
-	std::clog << "done." << std::endl << "> Loading spells... ";
+	g_weapons->loadDefaults();
 	if(!g_spells->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load Spells!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Loading actions... ";
 	if(!g_actions->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load Actions!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Loading talkactions... ";
 	if(!g_talkActions->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load TalkActions!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Loading movements... ";
 	if(!g_moveEvents->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load MoveEvents!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Loading creaturescripts... ";
 	if(!g_creatureEvents->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load CreatureEvents!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl << "> Loading globalscripts... ";
 	if(!g_globalEvents->loadFromXml())
 	{
-		std::clog << "failed!" << std::endl;
+		std::clog << "> ERROR: Unable to load GlobalEvents!" << std::endl;
 		return false;
 	}
 
-	std::clog << "done." << std::endl;
 	return true;
 }
 
@@ -135,7 +119,7 @@ bool ScriptManager::loadMods()
 	boost::filesystem::path modsPath(getFilePath(FILE_TYPE_MOD));
 	if(!boost::filesystem::exists(modsPath))
 	{
-		std::clog << "[Error - ScriptManager::loadMods] Could not locate mods directory" << std::endl;
+		std::clog << "[Error - ScriptManager::loadMods] Couldn't locate main directory" << std::endl;
 		return false;
 	}
 
@@ -143,7 +127,7 @@ bool ScriptManager::loadMods()
 	bool enabled = false;
 	for(boost::filesystem::directory_iterator it(modsPath), end; it != end; ++it)
 	{
-		std::string s = BOOST_DIR_ITER_FILENAME(it);
+		std::string s = it->leaf();
 		if(boost::filesystem::is_directory(it->status()) && (s.size() > 4 ? s.substr(s.size() - 4) : "") != ".xml")
 			continue;
 
@@ -212,15 +196,19 @@ bool ScriptManager::loadFromXml(const std::string& file, bool& enabled)
 	}
 
 	if(!readXMLString(root, "name", strValue))
-		strValue = file;
+	{
+		std::clog << "[Warning - ScriptManager::loadFromXml] Empty name in mod " << file << std::endl;
+		xmlFreeDoc(doc);
+		return false;
+	}
 
 	ModBlock mod;
-	mod.enabled = true;
-	mod.name = strValue;
-	if(readXMLString(root, "enabled", strValue) && !booleanString(strValue))
-		mod.enabled = false;
+	mod.enabled = false;
+	if(readXMLString(root, "enabled", strValue) && booleanString(strValue))
+		mod.enabled = true;
 
 	mod.file = file;
+	mod.name = strValue;
 	if(readXMLString(root, "author", strValue))
 		mod.author = strValue;
 
@@ -285,13 +273,11 @@ bool ScriptManager::loadFromXml(const std::string& file, bool& enabled)
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"group"))
 				Groups::getInstance()->parseGroupNode(p); //duplicates checking is dangerous, shouldn't be performed until we find some good solution
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"raid"))
-				Raids::getInstance()->parseRaidNode(p, modsLoaded, FILE_TYPE_MOD); //TODO: support mods path
+				Raids::getInstance()->parseRaidNode(p, modsLoaded, FILE_TYPE_MOD);
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"spawn"))
 				Spawns::getInstance()->parseSpawnNode(p, modsLoaded);
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"channel"))
-				g_chat.parseChannelNode(p); //TODO: duplicates- channel destructor needs to send closeChannel to users!
-			else if(!xmlStrcmp(p->name, (const xmlChar*)"npc"))
-				g_npcs.parseNpcNode(p, FILE_TYPE_MOD);
+				g_chat.parseChannelNode(p); //TODO: duplicates (channel destructor needs to send closeChannel to users)
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"monster"))
 			{
 				std::string path, name;
@@ -301,7 +287,7 @@ bool ScriptManager::loadFromXml(const std::string& file, bool& enabled)
 			else if(!xmlStrcmp(p->name, (const xmlChar*)"item"))
 			{
 				if(readXMLInteger(p, "id", intValue))
-					Item::items.parseItemNode(p, intValue);
+					Item::items.parseItemNode(p, intValue); //duplicates checking isn't necessary here
 			}
 			if(!xmlStrcmp(p->name, (const xmlChar*)"description") || !xmlStrcmp(p->name, (const xmlChar*)"info"))
 			{
@@ -315,14 +301,11 @@ bool ScriptManager::loadFromXml(const std::string& file, bool& enabled)
 			{
 				if(!readXMLString(p, "name", strValue))
 				{
-					if(!xmlStrcmp(p->name, (const xmlChar*)"lib"))
-						strValue = mod.name + "-lib";
-					else if(!xmlStrcmp(p->name, (const xmlChar*)"config"))
-						strValue = mod.name + "-config";
+					std::clog << "[Warning - ScriptManager::loadFromXml] Lib without name in mod " << file << std::endl;
+					continue;
 				}
-				else
-					toLowerCaseString(strValue);
 
+				toLowerCaseString(strValue);
 				std::string strLib;
 				if(parseXMLContentString(p->children, strLib))
 				{

@@ -43,86 +43,56 @@ extern Game g_game;
 
 Account IOLoginData::loadAccount(uint32_t accountId, bool preLoad/* = false*/)
 {
+	Account account;
 	Database* db = Database::getInstance();
 	DBQuery query;
 
 	query << "SELECT `name`, `password`, `salt`, `premdays`, `lastday`, `key`, `warnings` FROM `accounts` WHERE `id` = " << accountId << " LIMIT 1";
 	DBResult* result;
 	if(!(result = db->storeQuery(query.str())))
-		return Account();
+		return account;
 
-	Account account;
 	account.number = accountId;
 	account.name = result->getDataString("name");
 	account.password = result->getDataString("password");
 	account.salt = result->getDataString("salt");
-	account.premiumDays = std::max((int32_t)0, std::min((int32_t)GRATIS_PREMIUM, result->getDataInt("premdays")));
+	account.premiumDays = result->getDataInt("premdays");
 	account.lastDay = result->getDataInt("lastday");
 	account.recoveryKey = result->getDataString("key");
 	account.warnings = result->getDataInt("warnings");
 
+	query.str("");
 	result->free();
-	if(!preLoad)
-		loadCharacters(account);
-
-	return account;
-}
-
-bool IOLoginData::loadAccount(Account& account, const std::string& name)
-{
-	Database* db = Database::getInstance();
-	DBQuery query;
-
-	query << "SELECT `id`, `password`, `salt`, `premdays`, `lastday`, `key`, `warnings` FROM `accounts` WHERE `name` " << db->getStringComparer() << db->escapeString(name) << " LIMIT 1";
-	DBResult* result;
-	if(!(result = db->storeQuery(query.str())))
-		return false;
-
-	account.number = result->getDataInt("id");
-	account.name = name;
-	account.password = result->getDataString("password");
-	account.salt = result->getDataString("salt");
-	account.premiumDays = std::max((int32_t)0, std::min((int32_t)GRATIS_PREMIUM, result->getDataInt("premdays")));
-	account.lastDay = result->getDataInt("lastday");
-	account.recoveryKey = result->getDataString("key");
-	account.warnings = result->getDataInt("warnings");
-
-	result->free();
-	loadCharacters(account);
-	return true;
-}
-
-void IOLoginData::loadCharacters(Account& account)
-{
-	Database* db = Database::getInstance();
-	DBQuery query;
+	if(preLoad)
+		return account;
 
 #ifndef __LOGIN_SERVER__
-	query << "SELECT `name` FROM `players` WHERE `account_id` = " << account.number << " AND `world_id` = " << g_config.getNumber(ConfigManager::WORLD_ID) << " AND `deleted` = 0";
+	query << "SELECT `name` FROM `players` WHERE `account_id` = " << accountId << " AND `world_id` = " << g_config.getNumber(ConfigManager::WORLD_ID) << " AND `deleted` = 0";
 #else
-	query << "SELECT `id`, `name`, `world_id`, `online` FROM `players` WHERE `account_id` = " << account.number << " AND `deleted` = 0";
+	query << "SELECT `name`, `world_id` FROM `players` WHERE `account_id` = " << accountId << " AND `deleted` = 0";
 #endif
-	DBResult* result;
 	if(!(result = db->storeQuery(query.str())))
-		return;
+		return account;
 
 	do
 	{
+		std::string ss = result->getDataString("name");
 #ifndef __LOGIN_SERVER__
-		account.charList.push_back(result->getDataString("name"));
+		account.charList.push_back(ss.c_str());
 #else
-		std::string name = result->getDataString("name");
-		if(GameServer* srv = GameServers::getInstance()->getServerById(result->getDataInt("world_id")))
-			account.charList[name] = Character(name, srv, result->getDataInt("online"));
+		if(GameServer* server = GameServers::getInstance()->getServerById(result->getDataInt("world_id")))
+			account.charList[ss] = server;
 		else
-			std::clog << "[Warning - IOLoginData::loadAccount] Invalid server for player '" << name << "'." << std::endl;
+			std::clog << "[Warning - IOLoginData::loadAccount] Invalid server for player '" << ss << "'." << std::endl;
 #endif
 	}
 	while(result->next());
 	result->free();
 #ifndef __LOGIN_SERVER__
+
 	account.charList.sort();
 #endif
+	return account;
 }
 
 bool IOLoginData::saveAccount(Account account)
@@ -323,8 +293,8 @@ bool IOLoginData::validRecoveryKey(uint32_t accountId, std::string recoveryKey)
 	Database* db = Database::getInstance();
 
 	DBQuery query;
-	query << "SELECT `id` FROM `accounts` WHERE `id` = " << accountId << " AND `key` "
-		<< db->getStringComparer() << db->escapeString(recoveryKey) << " LIMIT 1";
+	query << "SELECT `id` FROM `accounts` WHERE `id` = " << accountId << " AND `key` ";
+	query << db->getStringComparer() << db->escapeString(recoveryKey) << " LIMIT 1";
 
 	DBResult* result;
 	if(!(result = db->storeQuery(query.str())))
@@ -360,44 +330,26 @@ uint64_t IOLoginData::createAccount(std::string name, std::string password)
 	return db->getLastInsertId();
 }
 
-void IOLoginData::removePremium(Account& account)
+void IOLoginData::removePremium(Account account)
 {
-	bool save = false;
 	uint64_t timeNow = time(NULL);
-	if(account.premiumDays != 0 && account.premiumDays != (uint16_t)GRATIS_PREMIUM)
+	if(account.premiumDays > 0 && account.premiumDays < 65535)
 	{
-		if(account.lastDay == 0)
+		uint32_t days = (uint32_t)std::ceil((timeNow - account.lastDay) / 86400);
+		if(days > 0)
 		{
-			account.lastDay = timeNow;
-			save = true;
-		}
-		else
-		{
-			uint32_t days = (timeNow - account.lastDay) / 86400;
-			if(days > 0)
-			{
-				if(account.premiumDays >= days)
-				{
-					account.premiumDays -= days;
-					uint32_t remainder = (timeNow - account.lastDay) % 86400;
-					account.lastDay = timeNow - remainder;
-				}
-				else
-				{
-					account.premiumDays = 0;
-					account.lastDay = 0;
-				}
-				save = true;
-			}
-		}
-	}
-	else if(account.lastDay != 0)
-	{
-		account.lastDay = 0;
-		save = true;
-	}
+			if(account.premiumDays >= days)
+				account.premiumDays -= days;
+			else
+				account.premiumDays = 0;
 
-	if(save && !saveAccount(account))
+			account.lastDay = timeNow;
+		}
+	}
+	else
+		account.lastDay = timeNow;
+
+	if(!saveAccount(account))
 		std::clog << "> ERROR: Failed to save account: " << account.name << "!" << std::endl;
 }
 
@@ -421,12 +373,13 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 	Database* db = Database::getInstance();
 	DBQuery query;
 	query << "SELECT `id`, `account_id`, `group_id`, `world_id`, `sex`, `vocation`, `experience`, `level`, "
-	<< "`maglevel`, `health`, `healthmax`, `blessings`, `pvp_blessing`, `mana`, `manamax`, `manaspent`, `soul`, "
-	<< "`lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `lookaddons`, `posx`, `posy`, "
-	<< "`posz`, `cap`, `lastlogin`, `lastlogout`, `lastip`, `conditions`, `skull`, `skulltime`, `guildnick`, "
-	<< "`rank_id`, `town_id`, `balance`, `stamina`, `direction`, `loss_experience`, `loss_mana`, `loss_skills`, "
-	<< "`loss_containers`, `loss_items`, `marriage`, `promotion`, `description`, `save` FROM `players` WHERE "
-	<< "`name` " << db->getStringComparer() << db->escapeString(name) << " AND `deleted` = 0 LIMIT 1";
+	<< "`maglevel`, `health`, `healthmax`, `blessings`, `mana`, `manamax`, `manaspent`, `soul`, `lookbody`, "
+	<< "`lookfeet`, `lookhead`, `looklegs`, `looktype`, `lookaddons`, `posx`, `posy`, `posz`, `cap`, "
+	<< "`lastlogin`, `lastlogout`, `lastip`, `conditions`, `skull`, `skulltime`, `guildnick`, `rank_id`, "
+	<< "`town_id`, `balance`, `stamina`, `direction`, `loss_experience`, `loss_mana`, `loss_skills`, "
+	<< "`loss_containers`, `loss_items`, `marriage`, `promotion`, `description` FROM `players` WHERE "
+	<< "`name` " << db->getStringComparer() << db->escapeString(name) << " AND `world_id` = "
+	<< g_config.getNumber(ConfigManager::WORLD_ID) << " AND `deleted` = 0 LIMIT 1";
 
 	DBResult* result;
 	if(!(result = db->storeQuery(query.str())))
@@ -439,19 +392,13 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 		return false;
 	}
 
-	Group* group = Groups::getInstance()->getGroup(result->getDataInt("group_id"));
-	if(!group->hasCustomFlag(PlayerCustomFlag_GamemasterPrivileges) &&
-		result->getDataInt("world_id") != g_config.getNumber(ConfigManager::WORLD_ID))
-	{
-		result->free();
-		return false;
-	}
-
 	Account account = loadAccount(accountId, true);
 	player->account = account.name;
 	player->accountId = accountId;
 
+	Group* group = Groups::getInstance()->getGroup(result->getDataInt("group_id"));
 	player->setGroup(group);
+
 	player->setGUID(result->getDataInt("id"));
 	player->premiumDays = account.premiumDays;
 
@@ -488,10 +435,7 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 	player->balance = result->getDataLong("balance");
 	if(g_config.getBool(ConfigManager::BLESSINGS) && (player->isPremium()
 		|| !g_config.getBool(ConfigManager::BLESSING_ONLY_PREMIUM)))
-	{
 		player->blessings = result->getDataInt("blessings");
-		player->setPVPBlessing(result->getDataInt("pvp_blessing") != 0);
-	}
 
 	uint64_t conditionsSize = 0;
 	const char* conditions = result->getDataStream("conditions", conditionsSize);
@@ -562,8 +506,6 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 		skull = (Skulls_t)result->getDataInt("skull");
 
 	player->setSkullEnd((time_t)result->getDataInt("skulltime"), true, skull);
-	player->saving = result->getDataInt("save") != 0;
-
 	player->town = result->getDataInt("town_id");
 	if(Town* town = Towns::getInstance()->getTown(player->town))
 		player->setMasterPosition(town->getPosition());
@@ -574,11 +516,11 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 	player->setLossPercent(LOSS_CONTAINERS, result->getDataInt("loss_containers"));
 	player->setLossPercent(LOSS_ITEMS, result->getDataInt("loss_items"));
 
+	player->loginPosition = Position(result->getDataInt("posx"), result->getDataInt("posy"), result->getDataInt("posz"));
 	player->lastLogin = result->getDataLong("lastlogin");
 	player->lastLogout = result->getDataLong("lastlogout");
-	player->lastIP = result->getDataInt("lastip");
 
-	player->loginPosition = Position(result->getDataInt("posx"), result->getDataInt("posy"), result->getDataInt("posz"));
+	player->lastIP = result->getDataInt("lastip");
 	if(!player->loginPosition.x || !player->loginPosition.y)
 		player->loginPosition = player->getMasterPosition();
 
@@ -600,14 +542,11 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 			player->rankName = result->getDataString("rank");
 			player->guildNick = nick;
 			result->free();
-
-			std::string tmpStatus = "AND `status` IN (1,4)";
-			if (g_config.getBool(ConfigManager::EXTERNAL_GUILD_WARS_MANAGEMENT))
-				tmpStatus = "AND `status` IN (1,4,9)";
+#ifdef __WAR_SYSTEM__
 
 			query.str("");
 			query << "SELECT `id`, `guild_id`, `enemy_id` FROM `guild_wars` WHERE (`guild_id` = "
-				<< player->guildId << " OR `enemy_id` = " << player->guildId << ")" << tmpStatus;
+				<< player->guildId << " OR `enemy_id` = " << player->guildId << ") AND `status` IN (1,4)";
 			if((result = db->storeQuery(query.str())))
 			{
 				War_t war;
@@ -630,6 +569,7 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 				while(result->next());
 				result->free();
 			}
+#endif
 		}
 	}
 	else if(g_config.getBool(ConfigManager::INGAME_GUILD_MANAGEMENT))
@@ -639,7 +579,7 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 		if((result = db->storeQuery(query.str())))
 		{
 			do
-				player->invitationsList.push_back((uint32_t)result->getDataInt("guild_id"));
+				player->invitedToGuildsList.push_back((uint32_t)result->getDataInt("guild_id"));
 			while(result->next());
 			result->free();
 		}
@@ -716,8 +656,8 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 			}
 		}
 
-		itemMap.clear();
 		result->free();
+		itemMap.clear();
 	}
 
 	//load depot items
@@ -742,15 +682,19 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 				else
 					std::clog << "[Error - IOLoginData::loadPlayer] Cannot load depot " << pid << " for player " << name << std::endl;
 			}
-			else if((it = itemMap.find(pid)) != itemMap.end())
+			else
 			{
-				if(Container* container = it->second.first->getContainer())
-					container->__internalAddThing(item);
+				it = itemMap.find(pid);
+				if(it != itemMap.end())
+				{
+					if(Container* container = it->second.first->getContainer())
+						container->__internalAddThing(item);
+				}
 			}
 		}
 
-		itemMap.clear();
 		result->free();
+		itemMap.clear();
 	}
 
 	//load storage map
@@ -773,41 +717,15 @@ bool IOLoginData::loadPlayer(Player* player, const std::string& name, bool preLo
 
 	if((result = db->storeQuery(query.str())))
 	{
+		std::string dummy;
 		do
 		{
 			uint32_t vid = result->getDataInt("vip");
 			if(storeNameByGuid(vid))
-				player->addVIP(vid, "", false, true);
+				player->addVIP(vid, dummy, false, true);
 		}
 		while(result->next());
 		result->free();
-	}
-
-	query.str("");
-	query << "SELECT `pk`.`player_id`, `pd`.`date` FROM `player_killers` pk LEFT JOIN `killers` k"
-		<< " ON `pk`.`kill_id` = `k`.`id` LEFT JOIN `player_deaths` pd ON `k`.`death_id` = `pd`.`id`"
-		<< " WHERE `pd`.`player_id` = " << player->getGUID() << " AND `k`.`unjustified` = 1 AND "
-		<< "`pd`.`date` >= " << (time(NULL) - (7 * 86400)) << " AND `k`.`war` = 0";
-
-	std::map<uint32_t, time_t> deaths;
-	if((result = db->storeQuery(query.str())))
-	{
-		do
-		{
-			if(!deaths[result->getDataInt("player_id")] || deaths[result->getDataInt("player_id")] < (time_t)result->getDataInt("date")) // pick up the latest date
-				deaths[result->getDataInt("player_id")] = (time_t)result->getDataInt("date");
-		}
-		while(result->next());
-		result->free();
-	}
-
-	if(!deaths.empty())
-	{
-		query.str("");
-		query << "SELECT `pd`.`player_id`, `pd`.`date` FROM `player_killers` pk LEFT JOIN `killers` k"
-			<< " ON `pk`.`kill_id` = `k`.`id` LEFT JOIN `player_deaths` pd ON `k`.`death_id` = `pd`.`id`"
-			<< " WHERE `pk`.`player_id` = " << player->getGUID() << " AND `k`.`unjustified` = 0 AND "
-			<< "`pd`.`date` >= " << (time(NULL) - (7 * 86400)) << " AND `k`.`war` = 0";
 	}
 
 	player->updateInventoryWeight();
@@ -851,8 +769,17 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 			player->mana = player->manaMax;
 		}
 	}
+
 	Database* db = Database::getInstance();
 	DBQuery query;
+	query << "SELECT `save` FROM `players` WHERE `id` = " << player->getGUID() << " LIMIT 1";
+
+	DBResult* result;
+	if(!(result = db->storeQuery(query.str())))
+		return false;
+
+	const bool save = result->getDataInt("save");
+	result->free();
 
 	DBTransaction trans(db);
 	if(!trans.begin())
@@ -860,7 +787,7 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 
 	query.str("");
 	query << "UPDATE `players` SET `lastlogin` = " << player->lastLogin << ", `lastip` = " << player->lastIP;
-	if(!player->isSaving() || !g_config.getBool(ConfigManager::SAVE_PLAYER_DATA))
+	if(!save || !player->isSaving())
 	{
 		query << " WHERE `id` = " << player->getGUID() << db->getUpdateLimiter();
 		if(!db->query(query.str()))
@@ -894,6 +821,9 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 	query << "`sex` = " << player->sex << ", ";
 	query << "`balance` = " << player->balance << ", ";
 	query << "`stamina` = " << player->getStamina() << ", ";
+	query << "`cast` = " << (player->getCastingState() ? 1 : 0) << ", "; //CA
+	query << "`castViewers` = " << player->getCastViewerCount() << ", ";
+	query << "`castDescription` = " << db->escapeString(player->getCastDescription()) << ", ";
 
 	Skulls_t skull = SKULL_RED;
 	if(g_config.getBool(ConfigManager::USE_BLACK_SKULL))
@@ -938,10 +868,7 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 	query << "`lastlogout` = " << player->getLastLogout() << ", ";
 	if(g_config.getBool(ConfigManager::BLESSINGS) && (player->isPremium()
 		|| !g_config.getBool(ConfigManager::BLESSING_ONLY_PREMIUM)))
-	{
 		query << "`blessings` = " << player->blessings << ", ";
-		query << "`pvp_blessing` = " << (player->hasPVPBlessing() ? "1" : "0") << ", ";
-	}
 
 	query << "`marriage` = " << player->marriage << ", ";
 	if(g_config.getBool(ConfigManager::INGAME_GUILD_MANAGEMENT))
@@ -976,21 +903,19 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 	if(!db->query(query.str()))
 		return false;
 
-	DBInsert stmt(db);
-	if(player->learnedInstantSpellList.size())
-	{
-		query.str("");
-		stmt.setQuery("INSERT INTO `player_spells` (`player_id`, `name`) VALUES ");
-		for(LearnedInstantSpellList::const_iterator it = player->learnedInstantSpellList.begin(); it != player->learnedInstantSpellList.end(); ++it)
-		{
-			query << player->getGUID() << "," << db->escapeString(*it);
-			if(!stmt.addRow(query))
-				return false;
-		}
+	char buffer[280];
+	DBInsert query_insert(db);
 
-		if(!stmt.execute())
+	query_insert.setQuery("INSERT INTO `player_spells` (`player_id`, `name`) VALUES ");
+	for(LearnedInstantSpellList::const_iterator it = player->learnedInstantSpellList.begin(); it != player->learnedInstantSpellList.end(); ++it)
+	{
+		sprintf(buffer, "%d, %s", player->getGUID(), db->escapeString(*it).c_str());
+		if(!query_insert.addRow(buffer))
 			return false;
 	}
+
+	if(!query_insert.execute())
+		return false;
 
 	//item saving
 	query.str("");
@@ -1005,8 +930,8 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 			itemList.push_back(itemBlock(slotId, item));
 	}
 
-	stmt.setQuery("INSERT INTO `player_items` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-	if(!saveItems(player, itemList, stmt))
+	query_insert.setQuery("INSERT INTO `player_items` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
+	if(!saveItems(player, itemList, query_insert))
 		return false;
 
 	itemList.clear();
@@ -1026,20 +951,16 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 	size_t size = s.length();
 	if(size > 0)
 	{*/
-
 		query.str("");
 		query << "DELETE FROM `player_depotitems` WHERE `player_id` = " << player->getGUID();// << " AND `pid` IN (" << s.substr(0, --size) << ")";
 		if(!db->query(query.str()))
 			return false;
 
-		if(itemList.size())
-		{
-			stmt.setQuery("INSERT INTO `player_depotitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-			if(!saveItems(player, itemList, stmt))
-				return false;
+		query_insert.setQuery("INSERT INTO `player_depotitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
+		if(!saveItems(player, itemList, query_insert))
+			return false;
 
-			itemList.clear();
-		}
+		itemList.clear();
 	//}
 
 	query.str("");
@@ -1048,48 +969,39 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 		return false;
 
 	player->generateReservedStorage();
-	query.str("");
-
-	stmt.setQuery("INSERT INTO `player_storage` (`player_id`, `key`, `value`) VALUES ");
+	query_insert.setQuery("INSERT INTO `player_storage` (`player_id`, `key`, `value`) VALUES ");
 	for(StorageMap::const_iterator cit = player->getStorageBegin(); cit != player->getStorageEnd(); ++cit)
 	{
-		query << player->getGUID() << "," << db->escapeString(cit->first) << "," << db->escapeString(cit->second);
-		if(!stmt.addRow(query))
+		sprintf(buffer, "%u, %s, %s", player->getGUID(), db->escapeString(cit->first).c_str(), db->escapeString(cit->second).c_str());
+		if(!query_insert.addRow(buffer))
 			return false;
 	}
 
-	if(!stmt.execute())
+	if(!query_insert.execute())
 		return false;
 
 	if(g_config.getBool(ConfigManager::INGAME_GUILD_MANAGEMENT))
 	{
-		query.str("");
 		//save guild invites
+		query.str("");
 		query << "DELETE FROM `guild_invites` WHERE player_id = " << player->getGUID();
 		if(!db->query(query.str()))
 			return false;
 
-		query.str("");
-		stmt.setQuery("INSERT INTO `guild_invites` (`player_id`, `guild_id`) VALUES ");
-		for(InvitationsList::iterator it = player->invitationsList.begin(); it != player->invitationsList.end(); ++it)
+		query_insert.setQuery("INSERT INTO `guild_invites` (`player_id`, `guild_id`) VALUES ");
+		for(InvitedToGuildsList::const_iterator it = player->invitedToGuildsList.begin(); it != player->invitedToGuildsList.end(); ++it)
 		{
-			if(!IOGuild::getInstance()->guildExists(*it))
-			{
-				it = player->invitationsList.erase(it);
-				continue;
-			}
-
-			query << player->getGUID() << "," << (*it);
-			if(!stmt.addRow(query))
+			sprintf(buffer, "%d, %d", player->getGUID(), *it);
+			if(!query_insert.addRow(buffer))
 				return false;
 		}
 
-		if(!stmt.execute())
+		if(!query_insert.execute())
 			return false;
 	}
 
+	//save vip list- FIXME: merge it to one config query?
 	query.str("");
-	//save vip list
 	if(!g_config.getBool(ConfigManager::VIPLIST_PER_PLAYER))
 		query << "DELETE FROM `account_viplist` WHERE `account_id` = " << player->getAccount() << " AND `world_id` = " << g_config.getNumber(ConfigManager::WORLD_ID);
 	else
@@ -1099,33 +1011,32 @@ bool IOLoginData::savePlayer(Player* player, bool preSave/* = true*/, bool shall
 		return false;
 
 	if(!g_config.getBool(ConfigManager::VIPLIST_PER_PLAYER))
-		stmt.setQuery("INSERT INTO `account_viplist` (`account_id`, `world_id`, `player_id`) VALUES ");
+		query_insert.setQuery("INSERT INTO `account_viplist` (`account_id`, `world_id`, `player_id`) VALUES ");
 	else
-		stmt.setQuery("INSERT INTO `player_viplist` (`player_id`, `vip_id`) VALUES ");
+		query_insert.setQuery("INSERT INTO `player_viplist` (`player_id`, `vip_id`) VALUES ");
 
-	query.str("");
-	for(VIPSet::iterator it = player->VIPList.begin(); it != player->VIPList.end(); ++it)
+	for(VIPSet::iterator it = player->VIPList.begin(); it != player->VIPList.end(); it++)
 	{
 		if(!playerExists(*it, false, false))
 			continue;
 
 		if(!g_config.getBool(ConfigManager::VIPLIST_PER_PLAYER))
-			query << player->getAccount() << "," << g_config.getNumber(ConfigManager::WORLD_ID) << "," << (*it);
+			sprintf(buffer, "%d, %d, %d", player->getAccount(), g_config.getNumber(ConfigManager::WORLD_ID), *it);
 		else
-			query << player->getGUID() << "," << (*it);
+			sprintf(buffer, "%d, %d", player->getGUID(), *it);
 
-		if(!stmt.addRow(query))
+		if(!query_insert.addRow(buffer))
 			return false;
 	}
 
-	if(!stmt.execute())
+	if(!query_insert.execute())
 		return false;
 
 	//End the transaction
 	return trans.commit();
 }
 
-bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList, DBInsert& stmt)
+bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList, DBInsert& query_insert)
 {
 	Database* db = Database::getInstance();
 	typedef std::pair<Container*, uint32_t> Stack;
@@ -1136,16 +1047,17 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 	for(ItemBlockList::const_iterator it = itemList.begin(); it != itemList.end(); ++it, ++runningId)
 	{
 		item = it->second;
+
 		PropWriteStream propWriteStream;
 		item->serializeAttr(propWriteStream);
 
 		uint32_t attributesSize = 0;
 		const char* attributes = propWriteStream.getStream(attributesSize);
+		char buffer[attributesSize * 3 + 100]; //MUST be (size * 2), else people can crash server when filling writable with native characters
 
-		std::stringstream buffer;
-		buffer << player->getGUID() << "," << it->first << "," << runningId << "," << item->getID() << ","
-			<< (int32_t)item->getSubType() << "," << db->escapeBlob(attributes, attributesSize);
-		if(!stmt.addRow(buffer))
+		sprintf(buffer, "%d, %d, %d, %d, %d, %s", player->getGUID(), it->first, runningId, item->getID(),
+			(int32_t)item->getSubType(), db->escapeBlob(attributes, attributesSize).c_str());
+		if(!query_insert.addRow(buffer))
 			return false;
 
 		if(Container* container = item->getContainer())
@@ -1169,30 +1081,16 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 
 			uint32_t attributesSize = 0;
 			const char* attributes = propWriteStream.getStream(attributesSize);
+			char buffer[attributesSize * 3 + 100]; //MUST be (size * 2), else people can crash server when filling writable with native characters
 
-			std::stringstream buffer;
-			buffer << player->getGUID() << "," << stack.second << "," << runningId << "," << item->getID() << ","
-				<< (int32_t)item->getSubType() << "," << db->escapeBlob(attributes, attributesSize);
-			if(!stmt.addRow(buffer))
+			sprintf(buffer, "%d, %d, %d, %d, %d, %s", player->getGUID(), stack.second, runningId, item->getID(),
+				(int32_t)item->getSubType(), db->escapeBlob(attributes, attributesSize).c_str());
+			if(!query_insert.addRow(buffer))
 				return false;
 		}
 	}
 
-	return stmt.execute();
-}
-
-bool IOLoginData::playerStatement(Player* _player, uint16_t channelId, const std::string& text, uint32_t& statementId)
-{
-	Database* db = Database::getInstance();
-	DBQuery query;
-
-	query << "INSERT INTO `player_statements` (`player_id`, `channel_id`, `text`, `date`) VALUES (" << _player->getGUID()
-		<< ", " << channelId << ", " << db->escapeString(text) << ", " << time(NULL) << ")";
-	if(!db->query(query.str()))
-		return false;
-
-	statementId = db->getLastInsertId();
-	return true;
+	return query_insert.execute();
 }
 
 bool IOLoginData::playerDeath(Player* _player, const DeathList& dl)
@@ -1213,15 +1111,36 @@ bool IOLoginData::playerDeath(Player* _player, const DeathList& dl)
 	if(size > tmp)
 		size = tmp;
 
+#ifdef __WAR_SYSTEM__
 	DeathList wl;
 	bool war = false;
 
+#endif
 	uint64_t deathId = db->getLastInsertId();
 	for(DeathList::const_iterator it = dl.begin(); i < size && it != dl.end(); ++it, ++i)
 	{
 		query.str("");
-		query << "INSERT INTO `killers` (`death_id`, `final_hit`, `unjustified`, `war`) VALUES ("
-			<< deathId << ", " << it->isLast() << ", " << it->isUnjustified() << ", " << it->getWar().war << ")";
+		query << "INSERT INTO `killers` (`death_id`, `final_hit`, `unjustified`"
+#ifdef __WAR_SYSTEM__
+			<< ", `war`"
+#endif
+			<< ") VALUES (" << deathId << ", " << it->isLast() << ", " << it->isUnjustified();
+#ifdef __WAR_SYSTEM__
+		if(it->isLast()) //last hit is always first and we got stored war data only there
+		{
+			War_t tmp = it->getWar();
+			if(tmp.war && tmp.frags[tmp.type == WAR_GUILD]
+				<= tmp.limit && tmp.frags[tmp.type] <= tmp.limit)
+				war = true;
+		}
+
+		if(war)
+			query << ", " << it->getWar().war;
+		else
+			query << ", 0";
+#endif
+
+		query << ")";
 		if(!db->query(query.str()))
 			return false;
 
@@ -1239,9 +1158,11 @@ bool IOLoginData::playerDeath(Player* _player, const DeathList& dl)
 
 			if(player)
 			{
+#ifdef __WAR_SYSTEM__
 				if(_player->isEnemy(player, false))
 					wl.push_back(*it);
 
+#endif
 				query.str("");
 				query << "INSERT INTO `player_killers` (`kill_id`, `player_id`) VALUES ("
 					<< killId << ", " << player->getGUID() << ")";
@@ -1263,9 +1184,11 @@ bool IOLoginData::playerDeath(Player* _player, const DeathList& dl)
 				return false;
 		}
 	}
+#ifdef __WAR_SYSTEM__
 
 	if(!wl.empty())
 		IOGuild::getInstance()->frag(_player, deathId, wl, war);
+#endif
 
 	return trans.commit();
 }
@@ -1280,7 +1203,7 @@ bool IOLoginData::playerMail(Creature* actor, std::string name, uint32_t townId,
 		townId = player->getTown();
 
 	Depot* depot = player->getDepot(townId, true);
-	if(g_game.internalMoveItem(actor, item->getParent(), depot, INDEX_WHEREEVER,
+	if(!depot || g_game.internalMoveItem(actor, item->getParent(), depot, INDEX_WHEREEVER,
 		item, item->getItemCount(), NULL, FLAG_NOLIMIT) != RET_NOERROR)
 	{
 		if(player->isVirtual())
@@ -1289,7 +1212,7 @@ bool IOLoginData::playerMail(Creature* actor, std::string name, uint32_t townId,
 		return false;
 	}
 
-	g_game.transformItem(item, item->getID() == ITEM_PARCEL ? ITEM_PARCEL_STAMPED : ITEM_LETTER_STAMPED);
+	g_game.transformItem(item, item->getID() + 1);
 	bool result = true, opened = player->getContainerID(depot) != -1;
 
 	Player* tmp = NULL;
@@ -1299,7 +1222,7 @@ bool IOLoginData::playerMail(Creature* actor, std::string name, uint32_t townId,
 	CreatureEventList mailEvents = player->getCreatureEvents(CREATURE_EVENT_MAIL_RECEIVE);
 	for(CreatureEventList::iterator it = mailEvents.begin(); it != mailEvents.end(); ++it)
 	{
-		if(!(*it)->executeMail(player, tmp, item, opened) && result)
+		if(!(*it)->executeMailReceive(player, tmp, item, opened) && result)
 			result = false;
 	}
 
@@ -1308,14 +1231,14 @@ bool IOLoginData::playerMail(Creature* actor, std::string name, uint32_t townId,
 		mailEvents = tmp->getCreatureEvents(CREATURE_EVENT_MAIL_SEND);
 		for(CreatureEventList::iterator it = mailEvents.begin(); it != mailEvents.end(); ++it)
 		{
-			if(!(*it)->executeMail(tmp, player, item, opened) && result)
+			if(!(*it)->executeMailSend(tmp, player, item, opened) && result)
 				result = false;
 		}
 	}
 
 	if(player->isVirtual())
 	{
-		savePlayer(player);
+		IOLoginData::getInstance()->savePlayer(player);
 		delete player;
 	}
 
@@ -1399,7 +1322,7 @@ bool IOLoginData::isPremium(uint32_t guid)
 	const uint32_t account = result->getDataInt("account_id");
 
 	result->free();
-	if(group && group->hasFlag(PlayerFlag_IsAlwaysPremium))
+	if(group && group->hasCustomFlag(PlayerFlag_IsAlwaysPremium))
 		return true;
 
 	query.str("");
@@ -1409,7 +1332,7 @@ bool IOLoginData::isPremium(uint32_t guid)
 
 	const uint32_t premium = result->getDataInt("premdays");
 	result->free();
-	return premium > 0;
+	return premium;
 }
 
 bool IOLoginData::playerExists(uint32_t guid, bool multiworld /*= false*/, bool checkCache /*= true*/)
@@ -1595,15 +1518,8 @@ bool IOLoginData::changeName(uint32_t guid, std::string newName, std::string old
 
 bool IOLoginData::createCharacter(uint32_t accountId, std::string characterName, int32_t vocationId, uint16_t sex)
 {
-	Database* db = Database::getInstance();
-	DBQuery query;
-	query << "SELECT `id` FROM `players` WHERE `name` " << db->getStringComparer() << db->escapeString(characterName) << ";";
-	DBResult* result = db->storeQuery(query.str());
-	if(result)
-	{
-		result->free();
+	if(playerExists(characterName))
 		return false;
-	}
 
 	Vocation* vocation = Vocations::getInstance()->getVocation(vocationId);
 	Vocation* rookVoc = Vocations::getInstance()->getVocation(0);
@@ -1631,7 +1547,9 @@ bool IOLoginData::createCharacter(uint32_t accountId, std::string characterName,
 		}
 	}
 
-	query.str("");
+	Database* db = Database::getInstance();
+	DBQuery query;
+
 	query << "INSERT INTO `players` (`id`, `name`, `world_id`, `group_id`, `account_id`, `level`, `vocation`, `health`, `healthmax`, `experience`, `lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `lookaddons`, `maglevel`, `mana`, `manamax`, `manaspent`, `soul`, `town_id`, `posx`, `posy`, `posz`, `conditions`, `cap`, `sex`, `lastlogin`, `lastip`, `skull`, `skulltime`, `save`, `rank_id`, `guildnick`, `lastlogout`, `blessings`, `online`) VALUES (NULL, " << db->escapeString(characterName) << ", " << g_config.getNumber(ConfigManager::WORLD_ID) << ", 1, " << accountId << ", " << level << ", " << vocationId << ", " << healthMax << ", " << healthMax << ", " << exp << ", 68, 76, 78, 39, " << lookType << ", 0, " << g_config.getNumber(ConfigManager::START_MAGICLEVEL) << ", " << manaMax << ", " << manaMax << ", 0, 100, " << g_config.getNumber(ConfigManager::SPAWNTOWN_ID) << ", " << g_config.getNumber(ConfigManager::SPAWNPOS_X) << ", " << g_config.getNumber(ConfigManager::SPAWNPOS_Y) << ", " << g_config.getNumber(ConfigManager::SPAWNPOS_Z) << ", 0, " << capMax << ", " << sex << ", 0, 0, 0, 0, 1, 0, '', 0, 0, 0)";
 	return db->query(query.str());
 }
@@ -1678,14 +1596,6 @@ DeleteCharacter_t IOLoginData::deleteCharacter(uint32_t accountId, const std::st
 		if(it_ != it->second->VIPList.end())
 			it->second->VIPList.erase(it_);
 	}
-
-	GuidCacheMap::iterator it = guidCacheMap.find(characterName);
-	if(it != guidCacheMap.end())
-		guidCacheMap.erase(it);
-
-	NameCacheMap::iterator it2 = nameCacheMap.find(id);
-	if(it2 != nameCacheMap.end())
-		nameCacheMap.erase(it2);
 
 	return DELETE_SUCCESS;
 }
@@ -1754,14 +1664,13 @@ bool IOLoginData::getUnjustifiedDates(uint32_t guid, std::vector<time_t>& dateLi
 {
 	Database* db = Database::getInstance();
 	DBQuery query;
-
-	uint32_t maxLength = std::max(g_config.getNumber(ConfigManager::FRAG_THIRD_LIMIT),
-		std::max(g_config.getNumber(ConfigManager::FRAG_SECOND_LIMIT),
-			g_config.getNumber(ConfigManager::FRAG_LIMIT)));
 	query << "SELECT `pd`.`date` FROM `player_killers` pk LEFT JOIN `killers` k ON `pk`.`kill_id` = `k`.`id`"
 		<< "LEFT JOIN `player_deaths` pd ON `k`.`death_id` = `pd`.`id` WHERE `pk`.`player_id` = " << guid
-		<< " AND `k`.`unjustified` = 1 AND `pd`.`date` >= " << (_time - maxLength) << " AND `k`.`war` = 0";
+		<< " AND `k`.`unjustified` = 1 AND `pd`.`date` >= " << (_time - (30 * 86400));
+#ifdef __WAR_SYSTEM__
 
+	query << " AND `k`.`war` = 0";
+#endif
 	DBResult* result;
 	if(!(result = db->storeQuery(query.str())))
 		return false;
@@ -1802,9 +1711,8 @@ bool IOLoginData::updatePremiumDays()
 	if(!(result = db->storeQuery(query.str())))
 		return false;
 
-	Account account;
 	do
-		removePremium((account = loadAccount(result->getDataInt("id"), true)));
+		removePremium(loadAccount(result->getDataInt("id"), true));
 	while(result->next());
 	result->free();
 
@@ -1828,12 +1736,11 @@ bool IOLoginData::updateOnlineStatus(uint32_t guid, bool login)
 		value = result->getDataInt("online");
 		result->free();
 
+		query.str("");
 		if(login)
 			value++;
 		else if(value > 0)
 			value--;
-			
-		query.str("");
 	}
 
 	query << "UPDATE `players` SET `online` = " << value << " WHERE `id` = " << guid << db->getUpdateLimiter();
@@ -1846,11 +1753,4 @@ bool IOLoginData::resetGuildInformation(uint32_t guid)
 	DBQuery query;
 	query << "UPDATE `players` SET `rank_id` = 0, `guildnick` = '' WHERE `id` = " << guid << " AND `deleted` = 0" << db->getUpdateLimiter();
 	return db->query(query.str());
-}
-
-void IOLoginData::increaseBankBalance(uint32_t guid, uint64_t bankBalance)
-{
-	DBQuery query;
-	query << "UPDATE `players` SET `balance` = `balance` + " << bankBalance << " WHERE `id` = " << guid << ";";
-	Database::getInstance()->query(query.str());
 }

@@ -34,6 +34,7 @@ class ProtocolOld : public Protocol
 			protocolOldCount++;
 #endif
 		}
+
 		virtual ~ProtocolOld()
 		{
 #ifdef __ENABLE_SERVER_DIAGNOSTIC__
@@ -48,7 +49,9 @@ class ProtocolOld : public Protocol
 		#ifdef __DEBUG_NET_DETAIL__
 		virtual void deleteProtocolTask();
 		#endif
+
 		void disconnectClient(uint8_t error, const char* message);
+		bool parseFirstPacket(NetworkMessage& msg);
 };
 
 class ProtocolOldLogin : public ProtocolOld

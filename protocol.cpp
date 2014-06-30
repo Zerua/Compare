@@ -68,8 +68,7 @@ void Protocol::onRecvMessage(NetworkMessage& msg)
 		#ifdef __DEBUG_NET_DETAIL__
 		std::clog << "Protocol::onRecvMessage - decrypt" << std::endl;
 		#endif
-		if(!XTEA_decrypt(msg))
-			return;
+		XTEA_decrypt(msg);
 	}
 
 	parsePacket(msg);
@@ -80,11 +79,13 @@ OutputMessage_ptr Protocol::getOutputBuffer()
 	if(m_outputBuffer)
 		return m_outputBuffer;
 
-	if(!m_connection)
-		return OutputMessage_ptr();
+	if(m_connection)
+	{
+		m_outputBuffer = OutputMessagePool::getInstance()->getOutputMessage(this);
+		return m_outputBuffer;
+	}
 
-	m_outputBuffer = OutputMessagePool::getInstance()->getOutputMessage(this);
-	return m_outputBuffer;
+	return OutputMessage_ptr();
 }
 
 void Protocol::releaseProtocol()
@@ -105,35 +106,41 @@ void Protocol::deleteProtocolTask()
 
 void Protocol::XTEA_encrypt(OutputMessage& msg)
 {
+	uint32_t k[4];
+	for(uint8_t i = 0; i < 4; i++)
+		k[i] = m_key[i];
+
+	int32_t messageLength = msg.size();
 	//add bytes until reach 8 multiple
-	uint16_t messageLength = msg.size();
-	if(messageLength % 8)
+	uint32_t n;
+	if((messageLength % 8) != 0)
 	{
-		uint16_t n = 8 - (messageLength % 8);
+		n = 8 - (messageLength % 8);
 		msg.putPadding(n);
-		messageLength += n;
+		messageLength = messageLength + n;
 	}
 
-	int32_t readPos = -1;
-	uint32_t *buffer = (uint32_t*)msg.getOutputBuffer(), delta = 0x61C88647;
-	while(++readPos < messageLength >> 2)
+	int32_t readPos = 0;
+	uint32_t* buffer = (uint32_t*)msg.getOutputBuffer();
+	while(readPos < messageLength / 4)
 	{
-		uint32_t v0 = buffer[readPos], v1 = buffer[readPos + 1], sum = 0;
-		for(int32_t i = 0; i < 32; ++i)
+		uint32_t v0 = buffer[readPos], v1 = buffer[readPos + 1], delta = 0x61C88647, sum = 0;
+		for(int32_t i = 0; i < 32; i++)
 		{
-			v0 += ((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + m_key[sum & 3]);
+			v0 += ((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + k[sum & 3]);
 			sum -= delta;
-			v1 += ((v0 << 4 ^ v0 >> 5) + v0) ^ (sum + m_key[sum >> 11 & 3]);
+			v1 += ((v0 << 4 ^ v0 >> 5) + v0) ^ (sum + k[sum>>11 & 3]);
 		}
 
 		buffer[readPos] = v0;
-		buffer[++readPos] = v1;
+		buffer[readPos + 1] = v1;
+		readPos += 2;
 	}
 }
 
 bool Protocol::XTEA_decrypt(NetworkMessage& msg)
 {
-	if((msg.size() - 6) % 8)
+	if((msg.size() - 6) % 8 != 0)
 	{
 		std::clog << "[Failure - Protocol::XTEA_decrypt] Not valid encrypted message size";
 		int32_t ip = getIP();
@@ -144,20 +151,25 @@ bool Protocol::XTEA_decrypt(NetworkMessage& msg)
 		return false;
 	}
 
-	int32_t messageLength = msg.size() - 6, readPos = -1;
-	uint32_t *buffer = (uint32_t*)(msg.buffer() + msg.position()), delta = 0x61C88647;
-	while(++readPos < messageLength >> 2)
+	uint32_t k[4];
+	for(uint8_t i = 0; i < 4; i++)
+		k[i] = m_key[i];
+
+	int32_t messageLength = msg.size() - 6, readPos = 0;
+	uint32_t* buffer = (uint32_t*)(msg.buffer() + msg.position());
+	while(readPos < messageLength / 4)
 	{
-		uint32_t v0 = buffer[readPos], v1 = buffer[readPos + 1], sum = 0xC6EF3720;
-		for(int32_t i = 0; i < 32; ++i)
+		uint32_t v0 = buffer[readPos], v1 = buffer[readPos + 1], delta = 0x61C88647, sum = 0xC6EF3720;
+		for(int32_t i = 0; i < 32; i++)
 		{
-			v1 -= ((v0 << 4 ^ v0 >> 5) + v0) ^ (sum + m_key[sum >> 11 & 3]);
+			v1 -= ((v0 << 4 ^ v0 >> 5) + v0) ^ (sum + k[sum >> 11 & 3]);
 			sum += delta;
-			v0 -= ((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + m_key[sum & 3]);
+			v0 -= ((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + k[sum & 3]);
 		}
 
 		buffer[readPos] = v0;
-		buffer[++readPos] = v1;
+		buffer[readPos + 1] = v1;
+		readPos += 2;
 	}
 
 	int32_t tmp = msg.get<uint16_t>();

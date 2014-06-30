@@ -34,7 +34,6 @@ class Spell;
 
 typedef std::map<uint32_t, RuneSpell*> RunesMap;
 typedef std::map<std::string, InstantSpell*> InstantsMap;
-typedef std::map<SpellGroup_t, uint32_t> SpellGroup;
 
 class Spells : public BaseEvents
 {
@@ -68,7 +67,6 @@ class Spells : public BaseEvents
 		RunesMap runes;
 		InstantsMap instants;
 
-		uint32_t spellId;
 		friend class CombatSpell;
 };
 
@@ -130,10 +128,6 @@ class Spell : public BaseSpell
 		int32_t getMana() const {return mana;}
 		int32_t getManaPercent() const {return manaPercent;}
 		uint32_t getExhaustion() const {return exhaustion;}
-		SpellGroup getGroupExhaustions() const {return groupExhaustions;}
-		uint16_t getId() const {return spellId;}
-		void setId(uint16_t id) {spellId = id;}
-
 		bool isEnabled() const {return enabled;}
 		bool isPremium() const {return premium;}
 
@@ -150,14 +144,8 @@ class Spell : public BaseSpell
 		bool checkInstantSpell(Player* player, const Position& toPos);
 		bool checkRuneSpell(Player* player, const Position& toPos);
 
-	private:
-		uint16_t spellId;
-
-	protected:
 		int32_t level;
 		int32_t magLevel;
-		int32_t skills[SKILL_LAST + 1];
-
 		bool premium;
 		bool learnable;
 		bool enabled;
@@ -175,11 +163,12 @@ class Spell : public BaseSpell
 		bool selfTarget;
 		bool isAggressive;
 
-		SpellGroup groupExhaustions;
-		std::string name;
-
 		VocationMap vocSpellMap;
-		StringVec vocStringVec;
+		typedef std::vector<std::string> VocStringVec;
+		VocStringVec vocStringVec;
+
+	private:
+		std::string name;
 };
 
 class InstantSpell : public TalkAction, public Spell
@@ -281,8 +270,9 @@ class RuneSpell : public Action, public Spell
 
 		//scripting
 		bool executeCastSpell(Creature* creature, const LuaVariant& var);
+
 		virtual bool isInstant() const {return false;}
-		uint32_t getRuneItemId() {return runeId;}
+		uint32_t getRuneItemId(){return runeId;}
 
 	protected:
 		virtual std::string getScriptEventName() const {return "onCastSpell";}
@@ -290,7 +280,6 @@ class RuneSpell : public Action, public Spell
 
 		static RuneSpellFunction Illusion;
 		static RuneSpellFunction Convince;
-		static RuneSpellFunction Soulfire;
 
 		bool internalCastSpell(Creature* creature, const LuaVariant& var);
 

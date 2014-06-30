@@ -54,13 +54,6 @@ enum
 	MP_MSG_CHAT_MESSAGE = 16
 };
 
-enum LuaReturn_t
-{
-	LUA_RESERVE = -1,
-	LUA_FALSE = 0,
-	LUA_TRUE = 1
-};
-
 class ProtocolManager; // TODO
 class NetworkMessage;
 class Player;
@@ -80,19 +73,19 @@ class Manager
 		void removeConnection(ProtocolManager* client);
 
 		bool allow(uint32_t ip) const;
-		LuaReturn_t execute(const std::string& script);
+		bool execute(const std::string& script);
 
 		void output(const std::string& message);
 		void addUser(Player* player);
 		void removeUser(uint32_t playerId);
 
-		void talk(uint32_t playerId, uint16_t channelId, MessageClasses type, const std::string& message);
+		void talk(uint32_t playerId, uint16_t channelId, SpeakClasses type, const std::string& message);
 		void addUser(uint32_t playerId, uint16_t channelId);
 		void removeUser(uint32_t playerId, uint16_t channelId);
 
 	protected:
-		Manager() {}
-		LuaInterface* m_interface;
+		Manager(): m_interface("Manager Interface") {m_interface.initState();}
+		LuaInterface m_interface;
 
 		typedef std::map<ProtocolManager*, bool> ClientMap;
 		ClientMap m_clients;
@@ -134,7 +127,7 @@ class ProtocolManager : public Protocol
 		void addUser(Player* player);
 		void removeUser(uint32_t playerId);
 
-		void talk(uint32_t playerId, uint16_t channelId, MessageClasses type, const std::string& message);
+		void talk(uint32_t playerId, uint16_t channelId, SpeakClasses type, const std::string& message);
 		void addUser(uint32_t playerId, uint16_t channelId);
 		void removeUser(uint32_t playerId, uint16_t channelId);
 
@@ -147,18 +140,7 @@ class ProtocolManager : public Protocol
 		};
 
 		virtual void parsePacket(NetworkMessage& msg);
-		virtual void releaseProtocol();
-#ifdef __DEBUG_NET_DETAIL__
 		virtual void deleteProtocolTask();
-#endif
-
-		void pong();
-		void execute(std::string lua);
-		void user(uint32_t playerId);
-
-		void channels();
-		void chat(std::string name, uint16_t channelId, MessageClasses type, std::string message);
-		void channel(uint16_t channelId, bool opening);
 
 	private:
 		void addLogLine(LogType_t type, std::string message);

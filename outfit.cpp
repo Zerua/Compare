@@ -62,13 +62,6 @@ bool Outfits::parseOutfitNode(xmlNodePtr p)
 	if(readXMLInteger(p, "access", intValue))
 		newOutfit.accessLevel = intValue;
 
-	if(readXMLString(p, "group", strValue) || readXMLString(p, "groups", strValue))
-	{
-		newOutfit.groups.clear();
-		if(!parseIntegerVec(strValue, newOutfit.groups))
-			std::clog << "[Warning - Outfits::parseOutfitNode] Invalid group(s) for an outfit with id " << newOutfit.outfitId << std::endl;
-	}
-
 	if(readXMLString(p, "quest", strValue))
 	{
 		newOutfit.storageId = strValue;
@@ -171,17 +164,14 @@ bool Outfits::parseOutfitNode(xmlNodePtr p)
 		if(readXMLInteger(listNode, "speed", intValue))
 			outfit.speed = intValue;
 
-		if(readXMLInteger(listNode, "attackspeed", intValue) || readXMLInteger(listNode, "attackSpeed", intValue))
-			outfit.attackSpeed = intValue;
-
 		for(xmlNodePtr configNode = listNode->children; configNode != NULL; configNode = configNode->next)
 		{
 			if(!xmlStrcmp(configNode->name, (const xmlChar*)"reflect"))
 			{
 				if(readXMLInteger(configNode, "percentAll", intValue))
 				{
-					for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
-						outfit.reflect[REFLECT_PERCENT][i] += intValue;
+					for(uint32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
+						outfit.reflect[REFLECT_PERCENT][(CombatType_t)i] += intValue;
 				}
 
 				if(readXMLInteger(configNode, "percentElements", intValue))
@@ -240,8 +230,8 @@ bool Outfits::parseOutfitNode(xmlNodePtr p)
 
 				if(readXMLInteger(configNode, "chanceAll", intValue))
 				{
-					for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
-						outfit.reflect[REFLECT_CHANCE][i] += intValue;
+					for(uint32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
+						outfit.reflect[REFLECT_CHANCE][(CombatType_t)i] += intValue;
 				}
 
 				if(readXMLInteger(configNode, "chanceElements", intValue))
@@ -302,8 +292,8 @@ bool Outfits::parseOutfitNode(xmlNodePtr p)
 			{
 				if(readXMLInteger(configNode, "percentAll", intValue))
 				{
-					for(uint32_t i = (COMBAT_FIRST + 1); i <= COMBAT_LAST; i <<= 1)
-						outfit.absorb[i] += intValue;
+					for(int32_t i = COMBAT_FIRST; i <= COMBAT_LAST; i++)
+						outfit.absorb[(CombatType_t)i] += intValue;
 				}
 
 				if(readXMLInteger(configNode, "percentElements", intValue))
@@ -482,7 +472,7 @@ bool Outfits::parseOutfitNode(xmlNodePtr p)
 					outfit.conditionSuppressions |= CONDITION_ENERGY;
 
 				if(readXMLString(configNode, "physical", strValue) && booleanString(strValue))
-					outfit.conditionSuppressions |= CONDITION_BLEEDING;
+					outfit.conditionSuppressions |= CONDITION_PHYSICAL;
 
 				if(readXMLString(configNode, "haste", strValue) && booleanString(strValue))
 					outfit.conditionSuppressions |= CONDITION_HASTE;
@@ -584,7 +574,7 @@ bool Outfits::loadFromXml()
 		return false;
 	}
 
-	xmlNodePtr root = xmlDocGetRootElement(doc);
+	xmlNodePtr p, root = xmlDocGetRootElement(doc);
 	if(xmlStrcmp(root->name,(const xmlChar*)"outfits"))
 	{
 		std::clog << "[Error - Outfits::loadFromXml] Malformed outfits file." << std::endl;
@@ -592,8 +582,12 @@ bool Outfits::loadFromXml()
 		return false;
 	}
 
-	for(xmlNodePtr p = root->children; p; p = p->next)
+	p = root->children;
+	while(p)
+	{
 		parseOutfitNode(p);
+		p = p->next;
+	}
 
 	xmlFreeDoc(doc);
 	return true;
@@ -827,7 +821,7 @@ int16_t Outfits::getOutfitReflect(uint32_t lookType, uint16_t sex, CombatType_t 
 		if(it->second.lookType != lookType)
 			continue;
 
-		if(it->second.reflect[REFLECT_PERCENT][combat] && it->second.reflect[REFLECT_CHANCE][combat] >= random_range(1, 100))
+		if(it->second.reflect[REFLECT_PERCENT][combat] && random_range(1, 100) < it->second.reflect[REFLECT_CHANCE][combat])
 			return it->second.reflect[REFLECT_PERCENT][combat];
 	}
 

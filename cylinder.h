@@ -23,19 +23,19 @@
 class Item;
 class Creature;
 
-enum CylinderFlags_t
+enum cylinderflags_t
 {
 	FLAG_NOLIMIT = 1,				//Bypass limits like capacity/container limits, blocking items/creatures etc.
 	FLAG_IGNOREBLOCKITEM = 2,		//Bypass movable blocking item checks
 	FLAG_IGNOREBLOCKCREATURE = 4,	//Bypass creature checks
 	FLAG_CHILDISOWNER = 8,			//Used by containers to query capacity of the carrier (player)
 	FLAG_PATHFINDING = 16,			//An additional check is done for floor changing/teleport items
-	FLAG_IGNOREFIELDDAMAGE = 32,	//Bypass field damage hecks
+	FLAG_IGNOREFIELDDAMAGE = 32,	//Bypass field damage checks
 	FLAG_IGNORENOTMOVABLE = 64,		//Bypass check for movability
 	FLAG_IGNOREAUTOSTACK = 128		//__queryDestination will not try to stack items together
 };
 
-enum CylinderLink_t
+enum cylinderlink_t
 {
 	LINK_OWNER,
 	LINK_PARENT,
@@ -70,7 +70,7 @@ class Cylinder
 		  * \returns ReturnValue holds the return value
 		  */
 		virtual ReturnValue __queryAdd(int32_t index, const Thing* Item, uint32_t count,
-			uint32_t flags, Creature* actor = NULL) const = 0;
+			uint32_t flags) const = 0;
 
 		/**
 		  * Query the cylinder how much it can accept
@@ -92,7 +92,7 @@ class Cylinder
 		  * \param flags optional flags to modifiy the default behaviour
 		  * \returns ReturnValue holds the return value
 		  */
-		virtual ReturnValue __queryRemove(const Thing* thing, uint32_t count, uint32_t flags, Creature* actor = NULL) const = 0;
+		virtual ReturnValue __queryRemove(const Thing* thing, uint32_t count, uint32_t flags) const = 0;
 
 		/**
 		  * Query the destination cylinder
@@ -152,7 +152,7 @@ class Cylinder
 		  * \param link holds the relation the object has to the cylinder
 		  */
 		virtual void postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
-			int32_t index, CylinderLink_t link = LINK_OWNER) = 0;
+			int32_t index, cylinderlink_t link = LINK_OWNER) = 0;
 
 		/**
 		  * Is sent after an operation (move/remove) to update internal values
@@ -163,7 +163,7 @@ class Cylinder
 		  * \param link holds the relation the object has to the cylinder
 		  */
 		virtual void postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
-			int32_t index, bool isCompleteRemoval, CylinderLink_t link = LINK_OWNER) = 0;
+			int32_t index, bool isCompleteRemoval, cylinderlink_t link = LINK_OWNER) = 0;
 
 		/**
 		  * Gets the index of an object
@@ -242,11 +242,11 @@ class VirtualCylinder : public Cylinder
 		virtual const Creature* getCreature() const {return NULL;}
 
 		virtual ReturnValue __queryAdd(int32_t, const Thing*, uint32_t,
-			uint32_t, Creature* = NULL) const {return RET_NOTPOSSIBLE;}
+			uint32_t) const {return RET_NOTPOSSIBLE;}
 		virtual ReturnValue __queryMaxCount(int32_t, const Thing*, uint32_t,
 			uint32_t&, uint32_t) const {return RET_NOTPOSSIBLE;}
 		virtual ReturnValue __queryRemove(const Thing* thing, uint32_t,
-			uint32_t, Creature* = NULL) const {return (thing->getParent() == this ? RET_NOERROR : RET_NOTPOSSIBLE);}
+			uint32_t) const {return (thing->getParent() == this ? RET_NOERROR : RET_NOTPOSSIBLE);}
 		virtual Cylinder* __queryDestination(int32_t&, const Thing*, Item**,
 			uint32_t&) {return NULL;}
 
@@ -257,8 +257,9 @@ class VirtualCylinder : public Cylinder
 		virtual void __removeThing(Thing*, uint32_t) {}
 
 		virtual void postAddNotification(Creature*, Thing*, const Cylinder*,
-			int32_t, CylinderLink_t/* link = LINK_OWNER*/) {}
+			int32_t, cylinderlink_t /*link = LINK_OWNER*/) {}
 		virtual void postRemoveNotification(Creature*, Thing*, const Cylinder*,
-			int32_t, bool, CylinderLink_t/* link = LINK_OWNER*/) {}
+			int32_t, bool,
+			cylinderlink_t /*link = LINK_OWNER*/) {}
 };
 #endif

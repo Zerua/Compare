@@ -91,7 +91,7 @@ BedItem* BedItem::getNextBedItem()
 bool BedItem::canUse(Player* player)
 {
 	if(!house || !player || player->isRemoved() || (!player->isPremium() && g_config.getBool(
-		ConfigManager::BED_REQUIRE_PREMIUM)))
+		ConfigManager::BED_REQUIRE_PREMIUM)) || player->hasCondition(CONDITION_INFIGHT))
 		return false;
 
 	if(!sleeper || house->getHouseAccessLevel(player) == HOUSE_OWNER)
@@ -130,7 +130,7 @@ void BedItem::sleep(Player* player)
 		g_game.addMagicEffect(player->getPosition(), MAGIC_EFFECT_SLEEP);
 		Scheduler::getInstance().addEvent(createSchedulerTask(SCHEDULER_MINTICKS, boost::bind(&Game::kickPlayer, &g_game, player->getID(), false)));
 	}
-	else if(Item::items[getID()].transformUseTo)
+	else if(Item::items[getID()].transformToFree)
 	{
 		wakeUp();
 		g_game.addMagicEffect(player->getPosition(), MAGIC_EFFECT_POFF);
@@ -173,9 +173,8 @@ void BedItem::wakeUp()
 
 void BedItem::regeneratePlayer(Player* player) const
 {
-	bool ok;
-	int32_t sleepStart = getIntegerAttribute("sleepstart", ok);
-	int32_t sleptTime = (int32_t)time(NULL) - sleepStart;
+	const int32_t* sleepStart = getIntegerAttribute("sleepstart");
+	int32_t sleptTime = (int32_t)time(NULL) - (sleepStart ? *sleepStart : 0);
 	if(Condition* condition = player->getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT))
 	{
 		int32_t amount = sleptTime / 30;
@@ -202,17 +201,17 @@ void BedItem::updateAppearance(const Player* player)
 	if(it.type != ITEM_TYPE_BED)
 		return;
 
-	if(player && it.transformBed[player->getSex(false)])
+	if(player && it.transformUseTo[player->getSex(false)])
 	{
-		const ItemType& newType = Item::items[it.transformBed[player->getSex(false)]];
+		const ItemType& newType = Item::items[it.transformUseTo[player->getSex(false)]];
 		if(newType.type == ITEM_TYPE_BED)
-			g_game.transformItem(this, it.transformBed[player->getSex(false)]);
+			g_game.transformItem(this, it.transformUseTo[player->getSex(false)]);
 	}
-	else if(it.transformUseTo)
+	else if(it.transformToFree)
 	{
-		const ItemType& newType = Item::items[it.transformUseTo];
+		const ItemType& newType = Item::items[it.transformToFree];
 		if(newType.type == ITEM_TYPE_BED)
-			g_game.transformItem(this, it.transformUseTo);
+			g_game.transformItem(this, it.transformToFree);
 	}
 }
 

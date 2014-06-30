@@ -89,7 +89,7 @@ Tile* IOMap::createTile(Item*& ground, Item* item, uint16_t px, uint16_t py, uin
 bool IOMap::loadMap(Map* map, const std::string& identifier)
 {
 	FileLoader f;
-	if(!f.openFile(identifier.c_str(), "OTBM", false, true))
+	if(!f.openFile(identifier.c_str(), false, true))
 	{
 		std::stringstream ss;
 		ss << "Could not open the file " << identifier << ".";
@@ -223,11 +223,6 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 	for(StringVec::iterator it = map->descriptions.begin(); it != map->descriptions.end(); ++it)
 		std::clog << "\"" << (*it) << "\"" << std::endl;
 
-#ifdef __GROUND_CACHE__
-	typedef std::map<uint16_t, std::pair<Item*, int32_t> > CacheMap;
-	CacheMap groundCache;
-
-#endif
 	NODE nodeMapData = f.getChildNode(nodeMap, type);
 	while(nodeMapData != NO_NODE)
 	{
@@ -245,14 +240,14 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 				return false;
 			}
 
-			OTBM_Destination_coords* areaCoord;
-			if(!propStream.getStruct(areaCoord))
+			OTBM_Destination_coords* area_coord;
+			if(!propStream.getStruct(area_coord))
 			{
 				setLastErrorString("Invalid map node.");
 				return false;
 			}
 
-			int32_t baseX = areaCoord->_x, baseY = areaCoord->_y, baseZ = areaCoord->_z;
+			int32_t base_x = area_coord->_x, base_y = area_coord->_y, base_z = area_coord->_z;
 			NODE nodeTile = f.getChildNode(nodeMapData, type);
 			while(nodeTile != NO_NODE)
 			{
@@ -279,14 +274,14 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 
 					Tile* tile = NULL;
 					Item* ground = NULL;
-					uint32_t flags = 0;
+					uint32_t tileflags = 0;
 
-					uint16_t px = baseX + tileCoord->_x, py = baseY + tileCoord->_y, pz = baseZ;
+					uint16_t px = base_x + tileCoord->_x, py = base_y + tileCoord->_y, pz = base_z;
 					House* house = NULL;
 					if(type == OTBM_HOUSETILE)
 					{
-						uint32_t houseId;
-						if(!propStream.getLong(houseId))
+						uint32_t _houseid;
+						if(!propStream.getLong(_houseid))
 						{
 							std::stringstream ss;
 							ss << "[x:" << px << ", y:" << py << ", z:" << pz << "] Could not read house id.";
@@ -295,11 +290,11 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 							return false;
 						}
 
-						house = Houses::getInstance()->getHouse(houseId, true);
+						house = Houses::getInstance()->getHouse(_houseid, true);
 						if(!house)
 						{
 							std::stringstream ss;
-							ss << "[x:" << px << ", y:" << py << ", z:" << pz << "] Could not create house id: " << houseId;
+							ss << "[x:" << px << ", y:" << py << ", z:" << pz << "] Could not create house id: " << _houseid;
 
 							setLastErrorString(ss.str());
 							return false;
@@ -310,15 +305,15 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 					}
 
 					//read tile attributes
-					uint8_t attribute = 0;
+					uint8_t attribute;
 					while(propStream.getByte(attribute))
 					{
 						switch(attribute)
 						{
 							case OTBM_ATTR_TILE_FLAGS:
 							{
-								uint32_t _flags;
-								if(!propStream.getLong(_flags))
+								uint32_t flags;
+								if(!propStream.getLong(flags))
 								{
 									std::stringstream ss;
 									ss << "[x:" << px << ", y:" << py << ", z:" << pz << "] Failed to read tile flags.";
@@ -327,22 +322,22 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 									return false;
 								}
 
-								if((_flags & TILESTATE_PROTECTIONZONE) == TILESTATE_PROTECTIONZONE)
-									flags |= TILESTATE_PROTECTIONZONE;
-								else if((_flags & TILESTATE_OPTIONALZONE) == TILESTATE_OPTIONALZONE)
-									flags |= TILESTATE_OPTIONALZONE;
-								else if((_flags & TILESTATE_HARDCOREZONE) == TILESTATE_HARDCOREZONE)
-									flags |= TILESTATE_HARDCOREZONE;
+								if((flags & TILESTATE_PROTECTIONZONE) == TILESTATE_PROTECTIONZONE)
+									tileflags |= TILESTATE_PROTECTIONZONE;
+								else if((flags & TILESTATE_OPTIONALZONE) == TILESTATE_OPTIONALZONE)
+									tileflags |= TILESTATE_OPTIONALZONE;
+								else if((flags & TILESTATE_HARDCOREZONE) == TILESTATE_HARDCOREZONE)
+									tileflags |= TILESTATE_HARDCOREZONE;
 
-								if((_flags & TILESTATE_NOLOGOUT) == TILESTATE_NOLOGOUT)
-									flags |= TILESTATE_NOLOGOUT;
+								if((flags & TILESTATE_NOLOGOUT) == TILESTATE_NOLOGOUT)
+									tileflags |= TILESTATE_NOLOGOUT;
 
-								if((_flags & TILESTATE_REFRESH) == TILESTATE_REFRESH)
+								if((flags & TILESTATE_REFRESH) == TILESTATE_REFRESH)
 								{
 									if(house)
 										std::clog << "[x:" << px << ", y:" << py << ", z:" << pz << "] House tile flagged as refreshing!";
 
-									flags |= TILESTATE_REFRESH;
+									tileflags |= TILESTATE_REFRESH;
 								}
 
 								break;
@@ -365,9 +360,9 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 
 								if(house && item->isMovable())
 								{
-									std::clog << "[Warning - IOMap::loadMap] Movable item in house: " << house->getId()
-										<< ", item type: " << item->getID() << ", at position " << px << "/" << py << "/"
-										<< pz << std::endl;
+									std::clog << "[Warning - IOMap::loadMap] Movable item in house: " << house->getId();
+									std::clog << ", item type: " << item->getID() << ", at position " << px << "/" << py << "/";
+									std::clog << pz << std::endl;
 
 									delete item;
 									item = NULL;
@@ -375,60 +370,22 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 								else if(tile)
 								{
 									tile->__internalAddThing(item);
-									if(item->getDecaying() != DECAYING_TRUE)
-									{
-										item->__startDecaying();
-										item->setLoadedFromMap(true);
-									}
+									item->__startDecaying();
+									item->setLoadedFromMap(true);
 								}
 								else if(item->isGroundTile())
 								{
-									if(ground)
-									{
-#ifdef __GROUND_CACHE__
-										CacheMap::iterator it = groundCache.find(ground->getID());
-										bool erase = it == groundCache.end();
-										if(!erase)
-										{
-											it->second.second--;
-											erase = it->second.second < 1;
-											if(erase)
-												groundCache.erase(it);
-										}
+									delete ground;
 
-										if(erase)
-#endif
-											delete ground;
-									}
-
-#ifdef __GROUND_CACHE__
-									const ItemType& tit = Item::items[item->getID()];
-									if(!(tit.magicEffect != MAGIC_EFFECT_NONE || !tit.walkStack || tit.transformUseTo != 0 || tit.cache ||
-										item->floorChange() || item->canDecay() || item->getActionId() > 0 || item->getUniqueId() > 0))
-									{
-										CacheMap::iterator it = groundCache.find(item->getID());
-										if(it != groundCache.end())
-										{
-											delete item;
-											item = it->second.first;
-											it->second.second++;
-										}
-										else
-											groundCache[item->getID()] = std::make_pair(item, 1);
-									}
-
-#endif
 									ground = item;
 								}
 								else
 								{
 									tile = createTile(ground, item, px, py, pz);
 									tile->__internalAddThing(item);
-									if(item->getDecaying() != DECAYING_TRUE)
-									{
-										item->__startDecaying();
-										item->setLoadedFromMap(true);
-									}
+
+									item->__startDecaying();
+									item->setLoadedFromMap(true);
 								}
 
 								break;
@@ -470,9 +427,9 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 
 								if(house && item->isMovable())
 								{
-									std::clog << "[Warning - IOMap::loadMap] Movable item in house: "
-										<< house->getId() << ", item type: " << item->getID()
-										<< ", pos " << px << "/" << py << "/" << pz << std::endl;
+									std::clog << "[Warning - IOMap::loadMap] Movable item in house: ";
+									std::clog << house->getId() << ", item type: " << item->getID();
+									std::clog << ", pos " << px << "/" << py << "/" << pz << std::endl;
 
 									delete item;
 									item = NULL;
@@ -480,60 +437,22 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 								else if(tile)
 								{
 									tile->__internalAddThing(item);
-									if(item->getDecaying() != DECAYING_TRUE)
-									{
-										item->__startDecaying();
-										item->setLoadedFromMap(true);
-									}
+									item->__startDecaying();
+									item->setLoadedFromMap(true);
 								}
 								else if(item->isGroundTile())
 								{
-									if(ground)
-									{
-#ifdef __GROUND_CACHE__
-										CacheMap::iterator it = groundCache.find(ground->getID());
-										bool erase = it == groundCache.end();
-										if(!erase)
-										{
-											it->second.second--;
-											erase = it->second.second < 1;
-											if(erase)
-												groundCache.erase(it);
-										}
+									delete ground;
 
-										if(erase)
-#endif
-											delete ground;
-									}
-
-#ifdef __GROUND_CACHE__
-									const ItemType& tit = Item::items[item->getID()];
-									if(!(tit.magicEffect != MAGIC_EFFECT_NONE || !tit.walkStack || tit.transformUseTo != 0 || tit.cache ||
-										item->floorChange() || item->canDecay() || item->getActionId() > 0 || item->getUniqueId() > 0))
-									{
-										CacheMap::iterator it = groundCache.find(item->getID());
-										if(it != groundCache.end())
-										{
-											delete item;
-											item = it->second.first;
-											it->second.second++;
-										}
-										else
-											groundCache[item->getID()] = std::make_pair(item, 1);
-									}
-
-#endif
 									ground = item;
 								}
 								else
 								{
 									tile = createTile(ground, item, px, py, pz);
 									tile->__internalAddThing(item);
-									if(item->getDecaying() != DECAYING_TRUE)
-									{
-										item->__startDecaying();
-										item->setLoadedFromMap(true);
-									}
+
+									item->__startDecaying();
+									item->setLoadedFromMap(true);
 								}
 							}
 							else
@@ -560,7 +479,7 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 					if(!tile)
 						tile = createTile(ground, NULL, px, py, pz);
 
-					tile->setFlag((tileflags_t)flags);
+					tile->setFlag((tileflags_t)tileflags);
 					map->setTile(px, py, pz, tile);
 				}
 				else
@@ -673,15 +592,6 @@ bool IOMap::loadMap(Map* map, const std::string& identifier)
 		nodeMapData = f.getNextNode(nodeMapData, type);
 	}
 
-#ifdef __GROUND_CACHE__
-	for(CacheMap::iterator it = groundCache.begin(); it != groundCache.end(); ++it)
-	{
-		//it->second.first->setParent(NULL);
-		g_game.grounds[it->second.first] = it->second.second;
-	}
-
-	groundCache.clear();
-#endif
 	return true;
 }
 

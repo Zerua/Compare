@@ -37,7 +37,7 @@ enum ConditionType_t
 	CONDITION_POISON = 1 << 0,
 	CONDITION_FIRE = 1 << 1,
 	CONDITION_ENERGY = 1 << 2,
-	CONDITION_BLEEDING = 1 << 3,
+	CONDITION_PHYSICAL = 1 << 3,
 	CONDITION_HASTE = 1 << 4,
 	CONDITION_PARALYZE = 1 << 5,
 	CONDITION_OUTFIT = 1 << 6,
@@ -57,8 +57,7 @@ enum ConditionType_t
 	CONDITION_CURSED = 1 << 20,
 	CONDITION_PACIFIED = 1 << 21,
 	CONDITION_GAMEMASTER = 1 << 22,
-	CONDITION_HUNTING = 1 << 23,
-	CONDITION_SPELLCOOLDOWN = 1 << 24
+	CONDITION_HUNTING = 1 << 23
 };
 
 enum ConditionEnd_t
@@ -283,7 +282,7 @@ class ConditionDamage: public Condition
 		bool getNextDamage(int32_t& damage);
 		bool doDamage(Creature* creature, int32_t damage);
 
-		bool delayed, forceUpdate, field;
+		bool forceUpdate, delayed;
 		int32_t maxDamage, minDamage, startDamage, periodDamage, periodDamageTick, tickInterval;
 		uint32_t owner;
 

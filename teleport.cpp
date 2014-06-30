@@ -70,3 +70,18 @@ void Teleport::__addThing(Creature* actor, int32_t, Thing* thing)
 		g_game.addMagicEffect(destTile->getPosition(), MAGIC_EFFECT_TELEPORT);
 	}
 }
+
+void Teleport::postAddNotification(Creature* actor, Thing* thing, const Cylinder* oldParent,
+	int32_t index, cylinderlink_t /*link = LINK_OWNER*/)
+{
+	if(getParent())
+		getParent()->postAddNotification(actor, thing, oldParent, index, LINK_PARENT);
+}
+
+void Teleport::postRemoveNotification(Creature* actor, Thing* thing, const Cylinder* newParent,
+	int32_t index, bool isCompleteRemoval, cylinderlink_t /*link = LINK_OWNER*/)
+{
+	if(getParent())
+		getParent()->postRemoveNotification(actor, thing, newParent,
+			index, isCompleteRemoval, LINK_PARENT);
+}

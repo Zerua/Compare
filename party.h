@@ -21,7 +21,6 @@
 
 typedef std::vector<Player*> PlayerVector;
 
-class Creature;
 class Player;
 class Party;
 
@@ -49,7 +48,7 @@ class Party
 		void updateIcons(Player* player);
 		void broadcastMessage(MessageClasses messageClass, const std::string& text, bool sendToInvitations = false);
 
-		void shareExperience(double experience, Creature* target, bool multiplied);
+		void shareExperience(double experience, bool fromMonster, bool multiplied);
 		bool setSharedExperience(Player* player, bool _sharedExpActive);
 		bool isSharedExperienceActive() const {return sharedExpActive;}
 		bool isSharedExperienceEnabled() const {return sharedExpEnabled;}

@@ -18,7 +18,6 @@
 #ifndef __DATABASE_SQLITE__
 #define __DATABASE_SQLITE__
 
-#ifdef __USE_SQLITE__
 #ifndef __DATABASE__
 #error "database.h should be included first."
 #endif
@@ -33,16 +32,16 @@ class DatabaseSQLite : public _Database
 		DatabaseSQLite();
 		DATABASE_VIRTUAL ~DatabaseSQLite() {sqlite3_close(m_handle);}
 
-		DATABASE_VIRTUAL bool multiLine() const {return false;}
+		DATABASE_VIRTUAL bool getParam(DBParam_t param);
 
 		DATABASE_VIRTUAL bool beginTransaction() {return query("BEGIN");}
 		DATABASE_VIRTUAL bool rollback() {return query("ROLLBACK");}
 		DATABASE_VIRTUAL bool commit() {return query("COMMIT");}
 
-		DATABASE_VIRTUAL bool query(std::string query);
-		DATABASE_VIRTUAL DBResult* storeQuery(std::string query);
+		DATABASE_VIRTUAL bool query(const std::string& query);
+		DATABASE_VIRTUAL DBResult* storeQuery(const std::string& query);
 
-		DATABASE_VIRTUAL std::string escapeString(std::string s);
+		DATABASE_VIRTUAL std::string escapeString(const std::string& s);
 		DATABASE_VIRTUAL std::string escapeBlob(const char* s, uint32_t length);
 
 		DATABASE_VIRTUAL uint64_t getLastInsertId() {return (uint64_t)sqlite3_last_insert_rowid(m_handle);}
@@ -80,5 +79,4 @@ class SQLiteResult : public _DBResult
 
 		sqlite3_stmt* m_handle;
 };
-#endif
 #endif
